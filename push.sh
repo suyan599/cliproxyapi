@@ -24,22 +24,28 @@ echo ""
 echo -e "${GREEN}1️⃣  添加所有更改...${NC}"
 git add .
 
+HAS_CHANGES=1
+
 # 检查是否有更改
 if git diff --cached --quiet; then
     echo -e "${YELLOW}⚠️  没有需要提交的更改${NC}"
-    exit 0
+    HAS_CHANGES=0
 fi
 
 # 获取提交信息
-if [ -z "$1" ]; then
-    COMMIT_MSG="Update: $(date '+%Y-%m-%d %H:%M:%S')"
-else
-    COMMIT_MSG="$1"
-fi
+if [ $HAS_CHANGES -eq 1 ]; then
+    if [ -z "$1" ]; then
+        COMMIT_MSG="Update: $(date '+%Y-%m-%d %H:%M:%S')"
+    else
+        COMMIT_MSG="$1"
+    fi
 
-# 提交
-echo -e "${GREEN}2️⃣  提交更改: ${COMMIT_MSG}${NC}"
-git commit -m "$COMMIT_MSG"
+    # 提交
+    echo -e "${GREEN}2️⃣  提交更改: ${COMMIT_MSG}${NC}"
+    git commit -m "$COMMIT_MSG"
+else
+    echo -e "${BLUE}2️⃣  跳过提交，继续推送当前分支与 tag${NC}"
+fi
 
 # 推送到 GitHub
 echo -e "${GREEN}3️⃣  推送到 ${REMOTE_URL}...${NC}"
