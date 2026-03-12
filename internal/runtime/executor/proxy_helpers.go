@@ -46,7 +46,8 @@ func newProxyAwareHTTPClient(ctx context.Context, cfg *config.Config, auth *clip
 
 	// If we have a proxy URL configured, set up the transport
 	if proxyURL != "" {
-		transport := buildProxyTransport(proxyURL)
+		disableKeepAlive := cfg != nil && cfg.ProxyDisableKeepAlive
+		transport := buildProxyTransport(proxyURL, disableKeepAlive)
 		if transport != nil {
 			httpClient.Transport = transport
 			return httpClient
@@ -68,10 +69,11 @@ func newProxyAwareHTTPClient(ctx context.Context, cfg *config.Config, auth *clip
 //
 // Parameters:
 //   - proxyURL: The proxy URL string (e.g., "socks5://user:pass@host:port", "http://host:port")
+//   - disableKeepAlive: When true, disables keep-alive so each request uses a new TCP connection.
 //
 // Returns:
 //   - *http.Transport: A configured transport, or nil if the proxy URL is invalid
-func buildProxyTransport(proxyURL string) *http.Transport {
+func buildProxyTransport(proxyURL string, disableKeepAlive bool) *http.Transport {
 	if proxyURL == "" {
 		return nil
 	}
@@ -112,5 +114,10 @@ func buildProxyTransport(proxyURL string) *http.Transport {
 		return nil
 	}
 
+	if disableKeepAlive && transport != nil {
+		transport.DisableKeepAlives = true
+		transport.MaxIdleConns = 0
+		transport.MaxIdleConnsPerHost = 0
+	}
 	return transport
 }

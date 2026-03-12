@@ -16,12 +16,16 @@ import (
 // defaultRoundTripperProvider returns a per-auth HTTP RoundTripper based on
 // the Auth.ProxyURL value. It caches transports per proxy URL string.
 type defaultRoundTripperProvider struct {
-	mu    sync.RWMutex
-	cache map[string]http.RoundTripper
+	mu                sync.RWMutex
+	cache             map[string]http.RoundTripper
+	disableKeepAlive  bool
 }
 
-func newDefaultRoundTripperProvider() *defaultRoundTripperProvider {
-	return &defaultRoundTripperProvider{cache: make(map[string]http.RoundTripper)}
+func newDefaultRoundTripperProvider(disableKeepAlive bool) *defaultRoundTripperProvider {
+	return &defaultRoundTripperProvider{
+		cache:            make(map[string]http.RoundTripper),
+		disableKeepAlive: disableKeepAlive,
+	}
 }
 
 // RoundTripperFor implements coreauth.RoundTripperProvider.
@@ -69,6 +73,11 @@ func (p *defaultRoundTripperProvider) RoundTripperFor(auth *coreauth.Auth) http.
 	} else {
 		log.Errorf("unsupported proxy scheme: %s", proxyURL.Scheme)
 		return nil
+	}
+	if p.disableKeepAlive && transport != nil {
+		transport.DisableKeepAlives = true
+		transport.MaxIdleConns = 0
+		transport.MaxIdleConnsPerHost = 0
 	}
 	p.mu.Lock()
 	p.cache[proxyStr] = transport

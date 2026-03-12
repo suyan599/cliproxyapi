@@ -9,6 +9,11 @@ type SDKConfig struct {
 	// ProxyURL is the URL of an optional proxy server to use for outbound requests.
 	ProxyURL string `yaml:"proxy-url" json:"proxy-url"`
 
+	// ProxyDisableKeepAlive forces outbound proxy transports to disable keep-alives.
+	// When true, each request establishes a new TCP connection to the proxy, which can
+	// help dynamic proxies rotate exit IPs per request.
+	ProxyDisableKeepAlive bool `yaml:"proxy-disable-keepalive" json:"proxy-disable-keepalive"`
+
 	// ForceModelPrefix requires explicit model prefixes (e.g., "teamA/gemini-3-pro-preview")
 	// to target prefixed credentials. When false, unprefixed model requests may use prefixed
 	// credentials as well.

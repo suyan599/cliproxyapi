@@ -643,9 +643,10 @@ func (h *Handler) apiCallTransport(auth *coreauth.Auth) http.RoundTripper {
 			proxyCandidates = append(proxyCandidates, proxyStr)
 		}
 	}
+	disableKeepAlive := h != nil && h.cfg != nil && h.cfg.ProxyDisableKeepAlive
 
 	for _, proxyStr := range proxyCandidates {
-		if transport := buildProxyTransport(proxyStr); transport != nil {
+		if transport := buildProxyTransport(proxyStr, disableKeepAlive); transport != nil {
 			return transport
 		}
 	}
@@ -659,7 +660,7 @@ func (h *Handler) apiCallTransport(auth *coreauth.Auth) http.RoundTripper {
 	return clone
 }
 
-func buildProxyTransport(proxyStr string) *http.Transport {
+func buildProxyTransport(proxyStr string, disableKeepAlive bool) *http.Transport {
 	proxyStr = strings.TrimSpace(proxyStr)
 	if proxyStr == "" {
 		return nil
@@ -687,16 +688,28 @@ func buildProxyTransport(proxyStr string) *http.Transport {
 			log.WithError(errSOCKS5).Debug("create SOCKS5 dialer failed")
 			return nil
 		}
-		return &http.Transport{
+		transport := &http.Transport{
 			Proxy: nil,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return dialer.Dial(network, addr)
 			},
 		}
+		if disableKeepAlive {
+			transport.DisableKeepAlives = true
+			transport.MaxIdleConns = 0
+			transport.MaxIdleConnsPerHost = 0
+		}
+		return transport
 	}
 
 	if proxyURL.Scheme == "http" || proxyURL.Scheme == "https" {
-		return &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+		transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+		if disableKeepAlive {
+			transport.DisableKeepAlives = true
+			transport.MaxIdleConns = 0
+			transport.MaxIdleConnsPerHost = 0
+		}
+		return transport
 	}
 
 	log.Debugf("unsupported proxy scheme: %s", proxyURL.Scheme)
