@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -62,6 +63,87 @@ func newProxyAwareHTTPClient(ctx context.Context, cfg *config.Config, auth *clip
 	}
 
 	return httpClient
+}
+
+func logProxyDiagnostics(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, provider string) {
+	if cfg == nil || !cfg.ProxyDiagnostics {
+		return
+	}
+
+	proxyURL, source := resolveProxyURL(cfg, auth, ctx)
+	disableKeepAlive := cfg.ProxyDisableKeepAlive
+	logger := logWithRequestID(ctx)
+	if proxyURL == "" {
+		if source == "roundtripper" {
+			logger.Debugf("proxy diag: provider=%s proxy=roundtripper disable_keepalive=%t", provider, disableKeepAlive)
+		} else {
+			logger.Debugf("proxy diag: provider=%s proxy=direct disable_keepalive=%t", provider, disableKeepAlive)
+		}
+	} else {
+		logger.Debugf("proxy diag: provider=%s proxy=%s source=%s disable_keepalive=%t", provider, redactProxyURL(proxyURL), source, disableKeepAlive)
+	}
+
+	diagURL := strings.TrimSpace(cfg.ProxyDiagnosticsURL)
+	if diagURL == "" {
+		return
+	}
+
+	client := newProxyAwareHTTPClient(ctx, cfg, auth, 2*time.Second)
+	if client == nil {
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, diagURL, nil)
+	if err != nil {
+		logger.Debugf("proxy diag: provider=%s exit_ip_error=%v", provider, err)
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.Debugf("proxy diag: provider=%s exit_ip_error=%v", provider, err)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	exitIP := strings.TrimSpace(string(body))
+	if exitIP == "" {
+		exitIP = "<empty>"
+	}
+	logger.Debugf("proxy diag: provider=%s exit_ip=%s status=%d", provider, exitIP, resp.StatusCode)
+}
+
+func resolveProxyURL(cfg *config.Config, auth *cliproxyauth.Auth, ctx context.Context) (string, string) {
+	if auth != nil {
+		if proxyURL := strings.TrimSpace(auth.ProxyURL); proxyURL != "" {
+			return proxyURL, "auth"
+		}
+	}
+	if cfg != nil {
+		if proxyURL := strings.TrimSpace(cfg.ProxyURL); proxyURL != "" {
+			return proxyURL, "config"
+		}
+	}
+	if ctx != nil {
+		if rt, ok := ctx.Value("cliproxy.roundtripper").(http.RoundTripper); ok && rt != nil {
+			return "", "roundtripper"
+		}
+	}
+	return "", "direct"
+}
+
+func redactProxyURL(proxyURL string) string {
+	parsed, err := url.Parse(proxyURL)
+	if err != nil || parsed == nil {
+		return proxyURL
+	}
+	if parsed.User != nil {
+		username := parsed.User.Username()
+		if username == "" {
+			parsed.User = url.UserPassword("user", "redacted")
+		} else {
+			parsed.User = url.UserPassword(username, "redacted")
+		}
+	}
+	return parsed.String()
 }
 
 // buildProxyTransport creates an HTTP transport configured for the given proxy URL.

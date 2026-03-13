@@ -920,6 +920,129 @@ func (h *Handler) PatchAuthFileFields(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+// RefreshAuthFiles triggers an immediate refresh for OAuth-based auth files.
+// It supports optional filtering by name, auth_index, or provider, and can limit to expired entries only.
+func (h *Handler) RefreshAuthFiles(c *gin.Context) {
+	if h.authManager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "core auth manager unavailable"})
+		return
+	}
+
+	type refreshRequest struct {
+		Name        string `json:"name"`
+		AuthIndex   string `json:"auth_index"`
+		Provider    string `json:"provider"`
+		OnlyExpired *bool  `json:"only_expired"`
+	}
+
+	var req refreshRequest
+	if raw, _ := io.ReadAll(c.Request.Body); len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+	}
+
+	name := strings.TrimSpace(req.Name)
+	authIndex := strings.TrimSpace(req.AuthIndex)
+	providerFilter := strings.ToLower(strings.TrimSpace(req.Provider))
+	onlyExpired := req.OnlyExpired != nil && *req.OnlyExpired
+
+	ctx := c.Request.Context()
+	now := time.Now()
+
+	type refreshResult struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Provider string `json:"provider"`
+		Status   string `json:"status"`
+		Error    string `json:"error,omitempty"`
+	}
+
+	var targets []*coreauth.Auth
+	if authIndex != "" {
+		if auth := h.authByIndex(authIndex); auth != nil {
+			targets = []*coreauth.Auth{auth}
+		}
+	} else if name != "" {
+		if auth, ok := h.authManager.GetByID(name); ok {
+			targets = []*coreauth.Auth{auth}
+		} else {
+			for _, auth := range h.authManager.List() {
+				if auth != nil && auth.FileName == name {
+					targets = []*coreauth.Auth{auth}
+					break
+				}
+			}
+		}
+	} else {
+		targets = h.authManager.List()
+	}
+
+	if len(targets) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "auth file not found"})
+		return
+	}
+
+	results := make([]refreshResult, 0, len(targets))
+	var refreshed, failed, skipped int
+
+	for _, auth := range targets {
+		if auth == nil {
+			continue
+		}
+		if providerFilter != "" && strings.ToLower(strings.TrimSpace(auth.Provider)) != providerFilter {
+			continue
+		}
+
+		outcome := refreshResult{
+			ID:       auth.ID,
+			Name:     auth.FileName,
+			Provider: auth.Provider,
+			Status:   "skipped",
+		}
+
+		if auth.Disabled {
+			outcome.Error = "disabled"
+			skipped++
+			results = append(results, outcome)
+			continue
+		}
+		if typ, _ := auth.AccountInfo(); typ == "api_key" {
+			outcome.Error = "api_key"
+			skipped++
+			results = append(results, outcome)
+			continue
+		}
+		if onlyExpired {
+			if exp, ok := auth.ExpirationTime(); !ok || exp.After(now) {
+				outcome.Error = "not_expired"
+				skipped++
+				results = append(results, outcome)
+				continue
+			}
+		}
+
+		if _, err := h.authManager.RefreshAuth(ctx, auth.ID); err != nil {
+			outcome.Status = "failed"
+			outcome.Error = err.Error()
+			failed++
+		} else {
+			outcome.Status = "refreshed"
+			refreshed++
+		}
+		results = append(results, outcome)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":    "ok",
+		"refreshed": refreshed,
+		"failed":    failed,
+		"skipped":   skipped,
+		"results":   results,
+	})
+}
+
 func (h *Handler) disableAuth(ctx context.Context, id string) {
 	if h == nil || h.authManager == nil {
 		return

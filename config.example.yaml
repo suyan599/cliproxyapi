@@ -69,6 +69,13 @@ proxy-url: ""
 # Useful for dynamic proxies that rotate exit IPs per connection.
 proxy-disable-keepalive: false
 
+# When true, log proxy routing details and optionally probe outbound exit IPs.
+proxy-diagnostics: false
+
+# Optional URL to probe for outbound exit IP logging when proxy-diagnostics is true.
+# Example: "https://api.ipify.org"
+proxy-diagnostics-url: ""
+
 # When true, unprefixed model requests only use credentials without a prefix (except when prefix == model name).
 force-model-prefix: false
 

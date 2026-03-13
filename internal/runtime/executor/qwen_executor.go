@@ -275,6 +275,7 @@ func (e *QwenExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 		AuthValue: authValue,
 	})
 
+	logProxyDiagnostics(ctx, e.cfg, auth, e.Identifier())
 	httpClient := newProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
@@ -386,6 +387,7 @@ func (e *QwenExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 		AuthValue: authValue,
 	})
 
+	logProxyDiagnostics(ctx, e.cfg, auth, e.Identifier())
 	httpClient := newProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {

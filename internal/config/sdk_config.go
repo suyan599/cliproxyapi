@@ -14,6 +14,13 @@ type SDKConfig struct {
 	// help dynamic proxies rotate exit IPs per request.
 	ProxyDisableKeepAlive bool `yaml:"proxy-disable-keepalive" json:"proxy-disable-keepalive"`
 
+	// ProxyDiagnostics enables logging of proxy routing details and optional exit IP probes.
+	ProxyDiagnostics bool `yaml:"proxy-diagnostics" json:"proxy-diagnostics"`
+
+	// ProxyDiagnosticsURL is an optional URL to probe for outbound exit IP logging.
+	// Example: "https://api.ipify.org". Only used when ProxyDiagnostics is true.
+	ProxyDiagnosticsURL string `yaml:"proxy-diagnostics-url" json:"proxy-diagnostics-url"`
+
 	// ForceModelPrefix requires explicit model prefixes (e.g., "teamA/gemini-3-pro-preview")
 	// to target prefixed credentials. When false, unprefixed model requests may use prefixed
 	// credentials as well.

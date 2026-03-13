@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -2159,6 +2160,15 @@ func (m *Manager) markRefreshPending(id string, now time.Time) bool {
 }
 
 func (m *Manager) refreshAuth(ctx context.Context, id string) {
+	_, _ = m.refreshAuthResult(ctx, id)
+}
+
+// RefreshAuth triggers an immediate refresh for the given auth ID and returns the updated auth.
+func (m *Manager) RefreshAuth(ctx context.Context, id string) (*Auth, error) {
+	return m.refreshAuthResult(ctx, id)
+}
+
+func (m *Manager) refreshAuthResult(ctx context.Context, id string) (*Auth, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -2169,14 +2179,18 @@ func (m *Manager) refreshAuth(ctx context.Context, id string) {
 		exec = m.executors[auth.Provider]
 	}
 	m.mu.RUnlock()
-	if auth == nil || exec == nil {
-		return
+	if auth == nil {
+		return nil, fmt.Errorf("auth not found")
 	}
+	if exec == nil {
+		return nil, fmt.Errorf("executor not found for provider %s", auth.Provider)
+	}
+
 	cloned := auth.Clone()
 	updated, err := exec.Refresh(ctx, cloned)
 	if err != nil && errors.Is(err, context.Canceled) {
 		log.Debugf("refresh canceled for %s, %s", auth.Provider, auth.ID)
-		return
+		return nil, err
 	}
 	log.Debugf("refreshed %s, %s, %v", auth.Provider, auth.ID, err)
 	now := time.Now()
@@ -2188,7 +2202,7 @@ func (m *Manager) refreshAuth(ctx context.Context, id string) {
 			m.auths[id] = current
 		}
 		m.mu.Unlock()
-		return
+		return nil, err
 	}
 	if updated == nil {
 		updated = cloned
@@ -2202,7 +2216,11 @@ func (m *Manager) refreshAuth(ctx context.Context, id string) {
 	updated.NextRefreshAfter = time.Time{}
 	updated.LastError = nil
 	updated.UpdatedAt = now
-	_, _ = m.Update(ctx, updated)
+	updatedAuth, _ := m.Update(ctx, updated)
+	if updatedAuth == nil {
+		return updated, nil
+	}
+	return updatedAuth, nil
 }
 
 func (m *Manager) executorFor(provider string) ProviderExecutor {
