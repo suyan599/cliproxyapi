@@ -470,7 +470,13 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 			auth.indexAssigned = existing.indexAssigned
 		}
 		if len(auth.ModelStates) == 0 && len(existing.ModelStates) > 0 {
-			auth.ModelStates = existing.ModelStates
+			// Only inherit previous ModelStates when the credential has not
+			// been refreshed.  A changed token means the operator (or auto-
+			// refresh) replaced the credential, so stale cooldown states
+			// must be dropped.
+			if !CredentialsChanged(existing, auth) {
+				auth.ModelStates = existing.ModelStates
+			}
 		}
 	}
 	auth.EnsureIndex()

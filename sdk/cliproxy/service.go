@@ -291,7 +291,16 @@ func (s *Service) applyCoreAuthAddOrUpdate(ctx context.Context, auth *coreauth.A
 		auth.LastRefreshedAt = existing.LastRefreshedAt
 		auth.NextRefreshAfter = existing.NextRefreshAfter
 		if len(auth.ModelStates) == 0 && len(existing.ModelStates) > 0 {
-			auth.ModelStates = existing.ModelStates
+			// Only inherit previous ModelStates when the credential has not
+			// been refreshed.  When the underlying token changes (e.g. the
+			// operator replaced the auth file), stale cooldown / unavailable
+			// states must be discarded so the credential is immediately
+			// eligible for selection again.
+			if !coreauth.CredentialsChanged(existing, auth) {
+				auth.ModelStates = existing.ModelStates
+			} else {
+				log.Infof("credentials changed for %s, clearing stale model states", auth.ID)
+			}
 		}
 		op = "update"
 		_, err = s.coreManager.Update(ctx, auth)

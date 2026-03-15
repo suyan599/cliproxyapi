@@ -394,6 +394,37 @@ func (a *Auth) AccountInfo() (string, string) {
 	return "", ""
 }
 
+// CredentialsChanged reports whether the core authentication material
+// (access_token, refresh_token, api_key) differs between old and new Auth
+// records.  This is used to decide whether stale ModelStates (cooldown /
+// unavailable flags) should be inherited when a credential file is updated.
+func CredentialsChanged(old, new_ *Auth) bool {
+	if old == nil || new_ == nil {
+		return old != new_
+	}
+	// Compare the credential-bearing metadata keys.
+	keys := []string{"access_token", "refresh_token"}
+	for _, k := range keys {
+		if metaString(old.Metadata, k) != metaString(new_.Metadata, k) {
+			return true
+		}
+	}
+	// Also compare Attributes-level api_key (used by API-key auths).
+	if old.Attributes["api_key"] != new_.Attributes["api_key"] {
+		return true
+	}
+	return false
+}
+
+// metaString safely extracts a string value from a metadata map.
+func metaString(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	v, _ := m[key].(string)
+	return v
+}
+
 // ExpirationTime attempts to extract the credential expiration timestamp from metadata.
 // It inspects common keys such as "expired", "expire", "expires_at", and also
 // nested "token" objects to remain compatible with legacy auth file formats.
