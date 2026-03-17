@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -287,6 +288,7 @@ func (s *Service) applyCoreAuthAddOrUpdate(ctx context.Context, auth *coreauth.A
 	op := "register"
 	var err error
 	if existing, ok := s.coreManager.GetByID(auth.ID); ok {
+		clearCooldownOnFileUpdate, clearReason := shouldClearModelStatesOnFileUpdate(existing, auth)
 		auth.CreatedAt = existing.CreatedAt
 		auth.LastRefreshedAt = existing.LastRefreshedAt
 		auth.NextRefreshAfter = existing.NextRefreshAfter
@@ -296,11 +298,16 @@ func (s *Service) applyCoreAuthAddOrUpdate(ctx context.Context, auth *coreauth.A
 			// operator replaced the auth file), stale cooldown / unavailable
 			// states must be discarded so the credential is immediately
 			// eligible for selection again.
-			if !coreauth.CredentialsChanged(existing, auth) {
+			if clearCooldownOnFileUpdate {
+				log.Infof("auth file updated for %s (%s), clearing stale model states", auth.ID, clearReason)
+			} else if !coreauth.CredentialsChanged(existing, auth) {
 				auth.ModelStates = existing.ModelStates
 			} else {
 				log.Infof("credentials changed for %s, clearing stale model states", auth.ID)
 			}
+		} else if clearCooldownOnFileUpdate && len(auth.ModelStates) > 0 {
+			log.Infof("auth file updated for %s (%s), clearing stale model states", auth.ID, clearReason)
+			auth.ModelStates = nil
 		}
 		op = "update"
 		_, err = s.coreManager.Update(ctx, auth)
@@ -321,6 +328,36 @@ func (s *Service) applyCoreAuthAddOrUpdate(ctx context.Context, auth *coreauth.A
 	// This operation may block on network calls, but the auth configuration
 	// is already effective at this point.
 	s.registerModelsForAuth(auth)
+}
+
+func shouldClearModelStatesOnFileUpdate(existing, incoming *coreauth.Auth) (bool, string) {
+	if existing == nil || incoming == nil {
+		return false, ""
+	}
+	if incoming.Disabled {
+		return false, ""
+	}
+	if incoming.Attributes == nil {
+		return false, ""
+	}
+	source := strings.TrimSpace(incoming.Attributes["source"])
+	path := strings.TrimSpace(incoming.Attributes["path"])
+	if source == "" {
+		source = path
+	}
+	if source == "" {
+		return false, ""
+	}
+	if strings.HasPrefix(source, "config:") || strings.HasPrefix(source, "runtime:") {
+		return false, ""
+	}
+	if filepath.IsAbs(source) || strings.Contains(source, string(filepath.Separator)) {
+		return true, source
+	}
+	if incoming.FileName != "" && source == incoming.FileName {
+		return true, source
+	}
+	return false, ""
 }
 
 func (s *Service) applyCoreAuthRemoval(ctx context.Context, id string) {

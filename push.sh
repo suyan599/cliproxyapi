@@ -11,11 +11,17 @@ echo -e "${BLUE}========================================${NC}"
 echo -e "${YELLOW}📦 推送代码到 GitHub${NC}"
 echo -e "${BLUE}========================================${NC}"
 
-# 显示远程仓库
+# 显示并校准远程仓库
+EXPECTED_REMOTE="https://github.com/suyan599/cliproxyapi"
 REMOTE_URL=$(git remote get-url origin 2>/dev/null)
 if [ -z "$REMOTE_URL" ]; then
-    echo -e "${RED}❌ 错误：未配置远程仓库${NC}"
-    exit 1
+    echo -e "${YELLOW}⚠️  未配置远程仓库，正在设置为 ${EXPECTED_REMOTE}${NC}"
+    git remote add origin "$EXPECTED_REMOTE"
+    REMOTE_URL="$EXPECTED_REMOTE"
+elif [ "$REMOTE_URL" != "$EXPECTED_REMOTE" ]; then
+    echo -e "${YELLOW}⚠️  远程仓库不匹配，正在更新为 ${EXPECTED_REMOTE}${NC}"
+    git remote set-url origin "$EXPECTED_REMOTE"
+    REMOTE_URL="$EXPECTED_REMOTE"
 fi
 echo -e "${BLUE}📍 远程仓库: ${REMOTE_URL}${NC}"
 echo ""
