@@ -1,6 +1,6 @@
 services:
   cli-proxy-api:
-    image: ${CLI_PROXY_IMAGE:-ghcr.io/geeme1/cliproxyapi:latest}
+    image: ${CLI_PROXY_IMAGE:-ghcr.io/suyan599/cliproxyapi:latest}
     pull_policy: always
     build:
       context: .

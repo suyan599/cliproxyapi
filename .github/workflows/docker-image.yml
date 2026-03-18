@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: geeme1/cliproxyapi
+  IMAGE_NAME: suyan599/cliproxyapi
 
 jobs:
   build:
