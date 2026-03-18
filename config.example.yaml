@@ -87,6 +87,16 @@ passthrough-headers: false
 # Useful for locating delays introduced by proxy connect, TLS handshake, or waiting for the first byte.
 request-log-upstream-timing: false
 
+# OAuth client credentials used by providers that require Google OAuth refresh flows.
+# Config values take precedence over environment variables.
+# oauth-clients:
+#   gemini:
+#     client-id: ""
+#     client-secret: ""
+#   antigravity:
+#     client-id: ""
+#     client-secret: ""
+
 # Number of times to retry a request. Retries will occur if the HTTP response code is 403, 408, 500, 502, 503, or 504.
 request-retry: 3
 

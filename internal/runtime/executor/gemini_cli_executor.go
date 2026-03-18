@@ -602,9 +602,10 @@ func prepareGeminiCLITokenSource(ctx context.Context, cfg *config.Config, auth *
 		}
 	}
 
+	clientID, clientSecret := geminiauth.ResolveOAuthCredentials(cfg)
 	conf := &oauth2.Config{
-		ClientID:     geminiauth.ClientID,
-		ClientSecret: geminiauth.ClientSecret,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
 		Scopes:       geminiOAuthScopes,
 		Endpoint:     google.Endpoint,
 	}

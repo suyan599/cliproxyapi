@@ -33,6 +33,9 @@ type SDKConfig struct {
 	// When enabled, logs include DNS, TCP connect, TLS handshake, request write, and first-byte timings.
 	RequestLogUpstreamTiming bool `yaml:"request-log-upstream-timing" json:"request-log-upstream-timing"`
 
+	// OAuthClients defines OAuth client credentials loaded from config for providers that require them.
+	OAuthClients OAuthClientsConfig `yaml:"oauth-clients" json:"oauth-clients"`
+
 	// APIKeys is a list of keys for authenticating clients to this proxy server.
 	APIKeys []string `yaml:"api-keys" json:"api-keys"`
 
@@ -46,6 +49,18 @@ type SDKConfig struct {
 	// NonStreamKeepAliveInterval controls how often blank lines are emitted for non-streaming responses.
 	// <= 0 disables keep-alives. Value is in seconds.
 	NonStreamKeepAliveInterval int `yaml:"nonstream-keepalive-interval,omitempty" json:"nonstream-keepalive-interval,omitempty"`
+}
+
+// OAuthClientsConfig holds provider-specific OAuth client credentials.
+type OAuthClientsConfig struct {
+	Gemini      OAuthClientCredentials `yaml:"gemini" json:"gemini"`
+	Antigravity OAuthClientCredentials `yaml:"antigravity" json:"antigravity"`
+}
+
+// OAuthClientCredentials defines an OAuth client ID/secret pair.
+type OAuthClientCredentials struct {
+	ClientID     string `yaml:"client-id" json:"client-id"`
+	ClientSecret string `yaml:"client-secret" json:"client-secret"`
 }
 
 // StreamingConfig holds server streaming behavior configuration.

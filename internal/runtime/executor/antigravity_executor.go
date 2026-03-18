@@ -1342,9 +1342,10 @@ func (e *AntigravityExecutor) refreshToken(ctx context.Context, auth *cliproxyau
 		return auth, statusErr{code: http.StatusUnauthorized, msg: "missing refresh token"}
 	}
 
+	clientID, clientSecret := antigravityauth.ResolveOAuthCredentials(e.cfg)
 	form := url.Values{}
-	form.Set("client_id", antigravityauth.ClientID)
-	form.Set("client_secret", antigravityauth.ClientSecret)
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", refreshToken)
 

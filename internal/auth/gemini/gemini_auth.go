@@ -42,6 +42,17 @@ var (
 	ClientSecret = strings.TrimSpace(os.Getenv(EnvClientSecret))
 )
 
+func ResolveOAuthCredentials(cfg *config.Config) (string, string) {
+	if cfg != nil {
+		clientID := strings.TrimSpace(cfg.OAuthClients.Gemini.ClientID)
+		clientSecret := strings.TrimSpace(cfg.OAuthClients.Gemini.ClientSecret)
+		if clientID != "" || clientSecret != "" {
+			return clientID, clientSecret
+		}
+	}
+	return ClientID, ClientSecret
+}
+
 // OAuth scopes for Gemini authentication
 var Scopes = []string{
 	"https://www.googleapis.com/auth/cloud-platform",
@@ -118,9 +129,10 @@ func (g *GeminiAuth) GetAuthenticatedClient(ctx context.Context, ts *GeminiToken
 	}
 
 	// Configure the OAuth2 client.
+	clientID, clientSecret := ResolveOAuthCredentials(cfg)
 	conf := &oauth2.Config{
-		ClientID:     ClientID,
-		ClientSecret: ClientSecret,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
 		RedirectURL:  callbackURL, // This will be used by the local server.
 		Scopes:       Scopes,
 		Endpoint:     google.Endpoint,
@@ -205,8 +217,8 @@ func (g *GeminiAuth) createTokenStorage(ctx context.Context, config *oauth2.Conf
 	}
 
 	ifToken["token_uri"] = "https://oauth2.googleapis.com/token"
-	ifToken["client_id"] = ClientID
-	ifToken["client_secret"] = ClientSecret
+	ifToken["client_id"] = config.ClientID
+	ifToken["client_secret"] = config.ClientSecret
 	ifToken["scopes"] = Scopes
 	ifToken["universe_domain"] = "googleapis.com"
 

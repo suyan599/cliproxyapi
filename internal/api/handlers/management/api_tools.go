@@ -300,9 +300,10 @@ func (h *Handler) refreshGeminiOAuthAccessToken(ctx context.Context, auth *corea
 		}
 	}
 
+	clientID, clientSecret := geminiauth.ResolveOAuthCredentials(h.cfg)
 	conf := &oauth2.Config{
-		ClientID:     geminiauth.ClientID,
-		ClientSecret: geminiauth.ClientSecret,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
 		Scopes:       geminiOAuthScopes,
 		Endpoint:     google.Endpoint,
 	}
@@ -355,9 +356,10 @@ func (h *Handler) refreshAntigravityOAuthAccessToken(ctx context.Context, auth *
 	if tokenURL == "" {
 		tokenURL = "https://oauth2.googleapis.com/token"
 	}
+	clientID, clientSecret := antigravityauth.ResolveOAuthCredentials(h.cfg)
 	form := url.Values{}
-	form.Set("client_id", antigravityauth.ClientID)
-	form.Set("client_secret", antigravityauth.ClientSecret)
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", refreshToken)
 

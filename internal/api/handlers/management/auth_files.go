@@ -1273,9 +1273,10 @@ func (h *Handler) RequestGeminiCLIToken(c *gin.Context) {
 	fmt.Println("Initializing Google authentication...")
 
 	// OAuth2 configuration using exported constants from internal/auth/gemini
+	clientID, clientSecret := geminiAuth.ResolveOAuthCredentials(h.cfg)
 	conf := &oauth2.Config{
-		ClientID:     geminiAuth.ClientID,
-		ClientSecret: geminiAuth.ClientSecret,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
 		RedirectURL:  fmt.Sprintf("http://localhost:%d/oauth2callback", geminiAuth.DefaultCallbackPort),
 		Scopes:       geminiAuth.Scopes,
 		Endpoint:     google.Endpoint,
@@ -1400,8 +1401,8 @@ func (h *Handler) RequestGeminiCLIToken(c *gin.Context) {
 		}
 
 		ifToken["token_uri"] = "https://oauth2.googleapis.com/token"
-		ifToken["client_id"] = geminiAuth.ClientID
-		ifToken["client_secret"] = geminiAuth.ClientSecret
+		ifToken["client_id"] = clientID
+		ifToken["client_secret"] = clientSecret
 		ifToken["scopes"] = geminiAuth.Scopes
 		ifToken["universe_domain"] = "googleapis.com"
 
