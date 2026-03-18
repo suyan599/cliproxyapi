@@ -83,6 +83,10 @@ force-model-prefix: false
 # Default is false (disabled).
 passthrough-headers: false
 
+# When true, append upstream HTTP phase timings to request logs.
+# Useful for locating delays introduced by proxy connect, TLS handshake, or waiting for the first byte.
+request-log-upstream-timing: false
+
 # Number of times to retry a request. Retries will occur if the HTTP response code is 403, 408, 500, 502, 503, or 504.
 request-retry: 3
 

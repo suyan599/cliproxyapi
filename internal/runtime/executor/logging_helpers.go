@@ -122,6 +122,28 @@ func recordAPIResponseMetadata(ctx context.Context, cfg *config.Config, status i
 	updateAggregatedResponse(ginCtx, attempts)
 }
 
+// recordAPIResponseTiming appends a timing breakdown for the latest upstream attempt.
+func recordAPIResponseTiming(ctx context.Context, cfg *config.Config, timing string) {
+	if cfg == nil || !cfg.RequestLog || strings.TrimSpace(timing) == "" {
+		return
+	}
+	ginCtx := ginContextFrom(ctx)
+	if ginCtx == nil {
+		return
+	}
+	attempts, attempt := ensureAttempt(ginCtx)
+	ensureResponseIntro(attempt)
+
+	attempt.response.WriteString("Timing:\n")
+	attempt.response.WriteString(timing)
+	if !strings.HasSuffix(timing, "\n") {
+		attempt.response.WriteString("\n")
+	}
+	attempt.response.WriteString("\n")
+
+	updateAggregatedResponse(ginCtx, attempts)
+}
+
 // recordAPIResponseError adds an error entry for the latest attempt when no HTTP response is available.
 func recordAPIResponseError(ctx context.Context, cfg *config.Config, err error) {
 	if cfg == nil || !cfg.RequestLog || err == nil {
