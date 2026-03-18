@@ -13,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/auth/codex"
@@ -30,9 +32,14 @@ import (
 
 // OAuth configuration constants for Gemini
 const (
-	ClientID            = "__REMOVED_GEMINI_OAUTH_CLIENT_ID__"
-	ClientSecret        = "__REMOVED_GEMINI_OAUTH_CLIENT_SECRET__"
 	DefaultCallbackPort = 8085
+	EnvClientID         = "GEMINI_OAUTH_CLIENT_ID"
+	EnvClientSecret     = "GEMINI_OAUTH_CLIENT_SECRET"
+)
+
+var (
+	ClientID     = strings.TrimSpace(os.Getenv(EnvClientID))
+	ClientSecret = strings.TrimSpace(os.Getenv(EnvClientSecret))
 )
 
 // OAuth scopes for Gemini authentication

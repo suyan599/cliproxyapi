@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	antigravityauth "github.com/router-for-me/CLIProxyAPI/v6/internal/auth/antigravity"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
@@ -44,8 +45,6 @@ const (
 	antigravityStreamPath          = "/v1internal:streamGenerateContent"
 	antigravityGeneratePath        = "/v1internal:generateContent"
 	antigravityModelsPath          = "/v1internal:fetchAvailableModels"
-	antigravityClientID            = "__REMOVED_ANTIGRAVITY_OAUTH_CLIENT_ID__"
-	antigravityClientSecret        = "__REMOVED_ANTIGRAVITY_OAUTH_CLIENT_SECRET__"
 	defaultAntigravityAgent        = "antigravity/1.19.6 darwin/arm64"
 	antigravityAuthType            = "antigravity"
 	refreshSkew                    = 3000 * time.Second
@@ -1344,8 +1343,8 @@ func (e *AntigravityExecutor) refreshToken(ctx context.Context, auth *cliproxyau
 	}
 
 	form := url.Values{}
-	form.Set("client_id", antigravityClientID)
-	form.Set("client_secret", antigravityClientSecret)
+	form.Set("client_id", antigravityauth.ClientID)
+	form.Set("client_secret", antigravityauth.ClientSecret)
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", refreshToken)
 

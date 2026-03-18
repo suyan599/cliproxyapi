@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	geminiauth "github.com/router-for-me/CLIProxyAPI/v6/internal/auth/gemini"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/geminicli"
@@ -32,10 +33,8 @@ import (
 )
 
 const (
-	codeAssistEndpoint      = "https://cloudcode-pa.googleapis.com"
-	codeAssistVersion       = "v1internal"
-	geminiOAuthClientID     = "__REMOVED_GEMINI_OAUTH_CLIENT_ID__"
-	geminiOAuthClientSecret = "__REMOVED_GEMINI_OAUTH_CLIENT_SECRET__"
+	codeAssistEndpoint = "https://cloudcode-pa.googleapis.com"
+	codeAssistVersion  = "v1internal"
 )
 
 var geminiOAuthScopes = []string{
@@ -604,8 +603,8 @@ func prepareGeminiCLITokenSource(ctx context.Context, cfg *config.Config, auth *
 	}
 
 	conf := &oauth2.Config{
-		ClientID:     geminiOAuthClientID,
-		ClientSecret: geminiOAuthClientSecret,
+		ClientID:     geminiauth.ClientID,
+		ClientSecret: geminiauth.ClientSecret,
 		Scopes:       geminiOAuthScopes,
 		Endpoint:     google.Endpoint,
 	}

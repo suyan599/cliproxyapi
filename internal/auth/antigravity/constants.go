@@ -1,11 +1,21 @@
 // Package antigravity provides OAuth2 authentication functionality for the Antigravity provider.
 package antigravity
 
+import (
+	"os"
+	"strings"
+)
+
 // OAuth client credentials and configuration
 const (
-	ClientID     = "__REMOVED_ANTIGRAVITY_OAUTH_CLIENT_ID__"
-	ClientSecret = "__REMOVED_ANTIGRAVITY_OAUTH_CLIENT_SECRET__"
 	CallbackPort = 51121
+	EnvClientID  = "ANTIGRAVITY_OAUTH_CLIENT_ID"
+	EnvSecret    = "ANTIGRAVITY_OAUTH_CLIENT_SECRET"
+)
+
+var (
+	ClientID     = strings.TrimSpace(os.Getenv(EnvClientID))
+	ClientSecret = strings.TrimSpace(os.Getenv(EnvSecret))
 )
 
 // Scopes defines the OAuth scopes required for Antigravity authentication

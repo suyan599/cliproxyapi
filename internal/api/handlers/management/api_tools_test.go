@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	antigravityauth "github.com/router-for-me/CLIProxyAPI/v6/internal/auth/antigravity"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 )
 
@@ -75,10 +76,10 @@ func TestResolveTokenForAuth_Antigravity_RefreshesExpiredToken(t *testing.T) {
 		if values.Get("refresh_token") != "rt" {
 			t.Fatalf("unexpected refresh_token: %s", values.Get("refresh_token"))
 		}
-		if values.Get("client_id") != antigravityOAuthClientID {
+		if values.Get("client_id") != antigravityauth.ClientID {
 			t.Fatalf("unexpected client_id: %s", values.Get("client_id"))
 		}
-		if values.Get("client_secret") != antigravityOAuthClientSecret {
+		if values.Get("client_secret") != antigravityauth.ClientSecret {
 			t.Fatalf("unexpected client_secret")
 		}
 

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	antigravityauth "github.com/router-for-me/CLIProxyAPI/v6/internal/auth/antigravity"
+	geminiauth "github.com/router-for-me/CLIProxyAPI/v6/internal/auth/gemini"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/geminicli"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -22,21 +24,11 @@ import (
 
 const defaultAPICallTimeout = 60 * time.Second
 
-const (
-	geminiOAuthClientID     = "__REMOVED_GEMINI_OAUTH_CLIENT_ID__"
-	geminiOAuthClientSecret = "__REMOVED_GEMINI_OAUTH_CLIENT_SECRET__"
-)
-
 var geminiOAuthScopes = []string{
 	"https://www.googleapis.com/auth/cloud-platform",
 	"https://www.googleapis.com/auth/userinfo.email",
 	"https://www.googleapis.com/auth/userinfo.profile",
 }
-
-const (
-	antigravityOAuthClientID     = "__REMOVED_ANTIGRAVITY_OAUTH_CLIENT_ID__"
-	antigravityOAuthClientSecret = "__REMOVED_ANTIGRAVITY_OAUTH_CLIENT_SECRET__"
-)
 
 var antigravityOAuthTokenURL = "https://oauth2.googleapis.com/token"
 
@@ -309,8 +301,8 @@ func (h *Handler) refreshGeminiOAuthAccessToken(ctx context.Context, auth *corea
 	}
 
 	conf := &oauth2.Config{
-		ClientID:     geminiOAuthClientID,
-		ClientSecret: geminiOAuthClientSecret,
+		ClientID:     geminiauth.ClientID,
+		ClientSecret: geminiauth.ClientSecret,
 		Scopes:       geminiOAuthScopes,
 		Endpoint:     google.Endpoint,
 	}
@@ -364,8 +356,8 @@ func (h *Handler) refreshAntigravityOAuthAccessToken(ctx context.Context, auth *
 		tokenURL = "https://oauth2.googleapis.com/token"
 	}
 	form := url.Values{}
-	form.Set("client_id", antigravityOAuthClientID)
-	form.Set("client_secret", antigravityOAuthClientSecret)
+	form.Set("client_id", antigravityauth.ClientID)
+	form.Set("client_secret", antigravityauth.ClientSecret)
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", refreshToken)
 
