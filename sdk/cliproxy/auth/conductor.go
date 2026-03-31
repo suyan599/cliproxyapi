@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -135,6 +136,9 @@ type Manager struct {
 	hook      Hook
 	mu        sync.RWMutex
 	auths     map[string]*Auth
+	// authIDsByProvider is a secondary index used to avoid scanning all auths
+	// when building provider-scoped candidate sets.
+	authIDsByProvider map[string]map[string]struct{}
 	// providerOffsets tracks per-model provider rotation state for multi-provider routing.
 	providerOffsets map[string]int
 
@@ -176,6 +180,7 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		selector:         selector,
 		hook:             hook,
 		auths:            make(map[string]*Auth),
+		authIDsByProvider: make(map[string]map[string]struct{}),
 		providerOffsets:  make(map[string]int),
 		refreshSemaphore: make(chan struct{}, refreshMaxConcurrency),
 	}
@@ -450,7 +455,7 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	}
 	auth.EnsureIndex()
 	m.mu.Lock()
-	m.auths[auth.ID] = auth.Clone()
+	m.setAuthLocked(auth.Clone())
 	m.mu.Unlock()
 	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
 	_ = m.persist(ctx, auth)
@@ -480,7 +485,7 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 		}
 	}
 	auth.EnsureIndex()
-	m.auths[auth.ID] = auth.Clone()
+	m.setAuthLocked(auth.Clone())
 	m.mu.Unlock()
 	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
 	_ = m.persist(ctx, auth)
@@ -500,12 +505,13 @@ func (m *Manager) Load(ctx context.Context) error {
 		return err
 	}
 	m.auths = make(map[string]*Auth, len(items))
+	m.authIDsByProvider = make(map[string]map[string]struct{})
 	for _, auth := range items {
 		if auth == nil || auth.ID == "" {
 			continue
 		}
 		auth.EnsureIndex()
-		m.auths[auth.ID] = auth.Clone()
+		m.setAuthLocked(auth.Clone())
 	}
 	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
 	if cfg == nil {
@@ -1701,14 +1707,19 @@ func (m *Manager) CloseExecutionSession(sessionID string) {
 
 func (m *Manager) pickNext(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, tried map[string]struct{}) (*Auth, ProviderExecutor, error) {
 	pinnedAuthID := pinnedAuthIDFromMetadata(opts.Metadata)
+	providerKey := normalizedProviderKey(provider)
 
 	m.mu.RLock()
 	executor, okExecutor := m.executors[provider]
+	if !okExecutor && providerKey != provider {
+		executor, okExecutor = m.executors[providerKey]
+	}
 	if !okExecutor {
 		m.mu.RUnlock()
 		return nil, nil, &Error{Code: "executor_not_found", Message: "executor not registered"}
 	}
-	candidates := make([]*Auth, 0, len(m.auths))
+	candidateIDs := m.providerAuthIDsLocked(providerKey)
+	candidates := make([]*Auth, 0, len(candidateIDs))
 	modelKey := strings.TrimSpace(model)
 	// Always use base model name (without thinking suffix) for auth matching.
 	if modelKey != "" {
@@ -1718,8 +1729,9 @@ func (m *Manager) pickNext(ctx context.Context, provider, model string, opts cli
 		}
 	}
 	registryRef := registry.GetGlobalRegistry()
-	for _, candidate := range m.auths {
-		if candidate.Provider != provider || candidate.Disabled {
+	for _, authID := range candidateIDs {
+		candidate := m.auths[authID]
+		if candidate == nil || candidate.Disabled {
 			continue
 		}
 		if pinnedAuthID != "" && candidate.ID != pinnedAuthID {
@@ -1737,6 +1749,7 @@ func (m *Manager) pickNext(ctx context.Context, provider, model string, opts cli
 		m.mu.RUnlock()
 		return nil, nil, &Error{Code: "auth_not_found", Message: "no auth available"}
 	}
+	opts = selectorOptionsWithAvailabilityScope(opts, pinnedAuthID, tried, providerKey)
 	selected, errPick := m.selector.Pick(ctx, provider, model, opts, candidates)
 	if errPick != nil {
 		m.mu.RUnlock()
@@ -1775,7 +1788,11 @@ func (m *Manager) pickNextMixed(ctx context.Context, providers []string, model s
 	}
 
 	m.mu.RLock()
-	candidates := make([]*Auth, 0, len(m.auths))
+	estimated := 0
+	for providerKey := range providerSet {
+		estimated += len(m.authIDsByProvider[providerKey])
+	}
+	candidates := make([]*Auth, 0, estimated)
 	modelKey := strings.TrimSpace(model)
 	// Always use base model name (without thinking suffix) for auth matching.
 	if modelKey != "" {
@@ -1785,35 +1802,32 @@ func (m *Manager) pickNextMixed(ctx context.Context, providers []string, model s
 		}
 	}
 	registryRef := registry.GetGlobalRegistry()
-	for _, candidate := range m.auths {
-		if candidate == nil || candidate.Disabled {
-			continue
-		}
-		if pinnedAuthID != "" && candidate.ID != pinnedAuthID {
-			continue
-		}
-		providerKey := strings.TrimSpace(strings.ToLower(candidate.Provider))
-		if providerKey == "" {
-			continue
-		}
-		if _, ok := providerSet[providerKey]; !ok {
-			continue
-		}
-		if _, used := tried[candidate.ID]; used {
-			continue
-		}
+	for providerKey := range providerSet {
 		if _, ok := m.executors[providerKey]; !ok {
 			continue
 		}
-		if modelKey != "" && registryRef != nil && !registryRef.ClientSupportsModel(candidate.ID, modelKey) {
-			continue
+		for _, authID := range m.providerAuthIDsLocked(providerKey) {
+			candidate := m.auths[authID]
+			if candidate == nil || candidate.Disabled {
+				continue
+			}
+			if pinnedAuthID != "" && candidate.ID != pinnedAuthID {
+				continue
+			}
+			if _, used := tried[candidate.ID]; used {
+				continue
+			}
+			if modelKey != "" && registryRef != nil && !registryRef.ClientSupportsModel(candidate.ID, modelKey) {
+				continue
+			}
+			candidates = append(candidates, candidate)
 		}
-		candidates = append(candidates, candidate)
 	}
 	if len(candidates) == 0 {
 		m.mu.RUnlock()
 		return nil, nil, "", &Error{Code: "auth_not_found", Message: "no auth available"}
 	}
+	opts = selectorOptionsWithAvailabilityScope(opts, pinnedAuthID, tried, providerSetCacheScope(providerSet))
 	selected, errPick := m.selector.Pick(ctx, "mixed", model, opts, candidates)
 	if errPick != nil {
 		m.mu.RUnlock()
@@ -1840,6 +1854,94 @@ func (m *Manager) pickNextMixed(ctx context.Context, providers []string, model s
 		m.mu.Unlock()
 	}
 	return authCopy, executor, providerKey, nil
+}
+
+func selectorOptionsWithAvailabilityScope(opts cliproxyexecutor.Options, pinnedAuthID string, tried map[string]struct{}, scope string) cliproxyexecutor.Options {
+	if strings.TrimSpace(pinnedAuthID) != "" || len(tried) > 0 {
+		return opts
+	}
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return opts
+	}
+	meta := make(map[string]any, len(opts.Metadata)+1)
+	for key, value := range opts.Metadata {
+		meta[key] = value
+	}
+	meta[selectorAvailabilityCacheScopeKey] = scope
+	opts.Metadata = meta
+	return opts
+}
+
+func providerSetCacheScope(providerSet map[string]struct{}) string {
+	if len(providerSet) == 0 {
+		return ""
+	}
+	providers := make([]string, 0, len(providerSet))
+	for provider := range providerSet {
+		providers = append(providers, provider)
+	}
+	sort.Strings(providers)
+	return "mixed:" + strings.Join(providers, ",")
+}
+
+func normalizedProviderKey(provider string) string {
+	return strings.ToLower(strings.TrimSpace(provider))
+}
+
+func (m *Manager) providerAuthIDsLocked(provider string) []string {
+	provider = normalizedProviderKey(provider)
+	if provider == "" || len(m.authIDsByProvider) == 0 {
+		return nil
+	}
+	index := m.authIDsByProvider[provider]
+	if len(index) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(index))
+	for id := range index {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (m *Manager) setAuthLocked(auth *Auth) {
+	if m == nil || auth == nil || strings.TrimSpace(auth.ID) == "" {
+		return
+	}
+	if existing := m.auths[auth.ID]; existing != nil {
+		m.removeAuthIDFromProviderIndexLocked(existing.Provider, auth.ID)
+	}
+	m.auths[auth.ID] = auth
+	providerKey := normalizedProviderKey(auth.Provider)
+	if providerKey == "" {
+		return
+	}
+	if m.authIDsByProvider == nil {
+		m.authIDsByProvider = make(map[string]map[string]struct{})
+	}
+	index := m.authIDsByProvider[providerKey]
+	if index == nil {
+		index = make(map[string]struct{})
+		m.authIDsByProvider[providerKey] = index
+	}
+	index[auth.ID] = struct{}{}
+}
+
+func (m *Manager) removeAuthIDFromProviderIndexLocked(provider, authID string) {
+	providerKey := normalizedProviderKey(provider)
+	authID = strings.TrimSpace(authID)
+	if providerKey == "" || authID == "" || len(m.authIDsByProvider) == 0 {
+		return
+	}
+	index := m.authIDsByProvider[providerKey]
+	if len(index) == 0 {
+		return
+	}
+	delete(index, authID)
+	if len(index) == 0 {
+		delete(m.authIDsByProvider, providerKey)
+	}
 }
 
 func (m *Manager) persist(ctx context.Context, auth *Auth) error {

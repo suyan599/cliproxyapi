@@ -527,3 +527,60 @@ func TestRoundRobinSelectorPick_MixedVirtualAndNonVirtualFallsBackToFlat(t *test
 		}
 	}
 }
+
+func TestRoundRobinSelectorPick_AvailabilityCacheSkipsStaleAuth(t *testing.T) {
+	t.Parallel()
+
+	selector := &RoundRobinSelector{}
+	auths := []*Auth{
+		{ID: "a"},
+		{ID: "b"},
+	}
+	opts := cliproxyexecutor.Options{
+		Metadata: map[string]any{
+			selectorAvailabilityCacheScopeKey: "provider:gemini",
+		},
+	}
+
+	first, err := selector.Pick(context.Background(), "gemini", "", opts, auths)
+	if err != nil {
+		t.Fatalf("Pick() first error = %v", err)
+	}
+	if first == nil || first.ID != "a" {
+		t.Fatalf("Pick() first auth = %#v, want ID a", first)
+	}
+
+	auths[1].Disabled = true
+
+	second, err := selector.Pick(context.Background(), "gemini", "", opts, auths)
+	if err != nil {
+		t.Fatalf("Pick() second error = %v", err)
+	}
+	if second == nil {
+		t.Fatalf("Pick() second auth = nil")
+	}
+	if second.ID != "a" {
+		t.Fatalf("Pick() second auth.ID = %q, want %q", second.ID, "a")
+	}
+}
+
+func TestRoundRobinSelectorPick_WithoutScopeDoesNotPopulateAvailabilityCache(t *testing.T) {
+	t.Parallel()
+
+	selector := &RoundRobinSelector{}
+	auths := []*Auth{
+		{ID: "a"},
+		{ID: "b"},
+	}
+
+	_, err := selector.Pick(context.Background(), "gemini", "", cliproxyexecutor.Options{}, auths)
+	if err != nil {
+		t.Fatalf("Pick() error = %v", err)
+	}
+
+	selector.cacheMu.RLock()
+	defer selector.cacheMu.RUnlock()
+	if len(selector.cache) != 0 {
+		t.Fatalf("len(selector.cache) = %d, want 0", len(selector.cache))
+	}
+}

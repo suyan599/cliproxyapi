@@ -22,6 +22,9 @@ type RoundRobinSelector struct {
 	mu      sync.Mutex
 	cursors map[string]int
 	maxKeys int
+
+	cacheMu sync.RWMutex
+	cache   map[string]availabilityCacheEntry
 }
 
 // FillFirstSelector selects the first available credential (deterministic ordering).
@@ -43,6 +46,16 @@ type modelCooldownError struct {
 	resetIn  time.Duration
 	provider string
 }
+
+type availabilityCacheEntry struct {
+	updatedAt time.Time
+	available []*Auth
+}
+
+const (
+	selectorAvailabilityCacheTTL      = time.Second
+	selectorAvailabilityCacheScopeKey = "_selector_availability_scope"
+)
 
 func newModelCooldownError(model, provider string, resetIn time.Duration) *modelCooldownError {
 	if resetIn < 0 {
@@ -248,19 +261,131 @@ func getAvailableAuths(auths []*Auth, provider, model string, now time.Time) ([]
 	return available, nil
 }
 
+func selectorAvailabilityScope(opts cliproxyexecutor.Options) string {
+	if len(opts.Metadata) == 0 {
+		return ""
+	}
+	raw, ok := opts.Metadata[selectorAvailabilityCacheScopeKey]
+	if !ok || raw == nil {
+		return ""
+	}
+	switch v := raw.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case []byte:
+		return strings.TrimSpace(string(v))
+	default:
+		return ""
+	}
+}
+
+func availabilityCacheKey(scope, provider, model string) string {
+	return scope + "|" + provider + "|" + canonicalModelKey(model)
+}
+
+func cloneAuthSlice(auths []*Auth) []*Auth {
+	if len(auths) == 0 {
+		return nil
+	}
+	cloned := make([]*Auth, len(auths))
+	copy(cloned, auths)
+	return cloned
+}
+
+func authInCandidateSet(auths []*Auth, target *Auth) bool {
+	if target == nil {
+		return false
+	}
+	for i := 0; i < len(auths); i++ {
+		candidate := auths[i]
+		if candidate == nil {
+			continue
+		}
+		if candidate == target || candidate.ID == target.ID {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *RoundRobinSelector) getAvailableAuths(provider, model string, opts cliproxyexecutor.Options, auths []*Auth, now time.Time) ([]*Auth, error) {
+	scope := selectorAvailabilityScope(opts)
+	if scope == "" {
+		return getAvailableAuths(auths, provider, model, now)
+	}
+
+	key := availabilityCacheKey(scope, provider, model)
+	if cached := s.loadAvailabilityCache(key, now); len(cached) > 0 {
+		return cached, nil
+	}
+
+	available, err := getAvailableAuths(auths, provider, model, now)
+	if err != nil {
+		return nil, err
+	}
+	s.storeAvailabilityCache(key, now, available)
+	return available, nil
+}
+
+func (s *RoundRobinSelector) loadAvailabilityCache(key string, now time.Time) []*Auth {
+	s.cacheMu.RLock()
+	entry, ok := s.cache[key]
+	s.cacheMu.RUnlock()
+	if !ok {
+		return nil
+	}
+	if now.Sub(entry.updatedAt) > selectorAvailabilityCacheTTL {
+		return nil
+	}
+	return cloneAuthSlice(entry.available)
+}
+
+func (s *RoundRobinSelector) storeAvailabilityCache(key string, now time.Time, available []*Auth) {
+	if len(available) == 0 {
+		return
+	}
+	s.cacheMu.Lock()
+	if s.cache == nil {
+		s.cache = make(map[string]availabilityCacheEntry)
+	}
+	limit := s.maxKeys
+	if limit <= 0 {
+		limit = 4096
+	}
+	if _, ok := s.cache[key]; !ok && len(s.cache) >= limit {
+		s.cache = make(map[string]availabilityCacheEntry)
+	}
+	s.cache[key] = availabilityCacheEntry{
+		updatedAt: now,
+		available: cloneAuthSlice(available),
+	}
+	s.cacheMu.Unlock()
+}
+
+func (s *RoundRobinSelector) invalidateAvailabilityCache(key string) {
+	s.cacheMu.Lock()
+	if s.cache != nil {
+		delete(s.cache, key)
+	}
+	s.cacheMu.Unlock()
+}
+
 // Pick selects the next available auth for the provider in a round-robin manner.
 // For gemini-cli virtual auths (identified by the gemini_virtual_parent attribute),
 // a two-level round-robin is used: first cycling across credential groups (parent
 // accounts), then cycling within each group's project auths.
 func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*Auth) (*Auth, error) {
-	_ = opts
 	now := time.Now()
-	available, err := getAvailableAuths(auths, provider, model, now)
+	available, err := s.getAvailableAuths(provider, model, opts, auths, now)
 	if err != nil {
 		return nil, err
 	}
 	available = preferCodexWebsocketAuths(ctx, provider, available)
 	key := provider + ":" + canonicalModelKey(model)
+	cacheKey := ""
+	if scope := selectorAvailabilityScope(opts); scope != "" {
+		cacheKey = availabilityCacheKey(scope, provider, model)
+	}
 	s.mu.Lock()
 	if s.cursors == nil {
 		s.cursors = make(map[string]int)
@@ -299,7 +424,12 @@ func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, o
 		}
 		s.cursors[innerKey] = innerIndex + 1
 		s.mu.Unlock()
-		return group[innerIndex%len(group)], nil
+		selected := group[innerIndex%len(group)]
+		if cacheKey != "" && (!authInCandidateSet(auths, selected) || isAuthCurrentlyBlocked(selected, model, now)) {
+			s.invalidateAvailabilityCache(cacheKey)
+			return s.pickWithoutCache(ctx, provider, model, auths, now)
+		}
+		return selected, nil
 	}
 
 	// Flat round-robin for non-grouped auths (original behavior).
@@ -310,7 +440,73 @@ func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, o
 	}
 	s.cursors[key] = index + 1
 	s.mu.Unlock()
+	selected := available[index%len(available)]
+	if cacheKey != "" && (!authInCandidateSet(auths, selected) || isAuthCurrentlyBlocked(selected, model, now)) {
+		s.invalidateAvailabilityCache(cacheKey)
+		return s.pickWithoutCache(ctx, provider, model, auths, now)
+	}
+	return selected, nil
+}
+
+func (s *RoundRobinSelector) pickWithoutCache(ctx context.Context, provider, model string, auths []*Auth, now time.Time) (*Auth, error) {
+	available, err := getAvailableAuths(auths, provider, model, now)
+	if err != nil {
+		return nil, err
+	}
+	available = preferCodexWebsocketAuths(ctx, provider, available)
+	return s.pickFromAvailable(provider, model, available)
+}
+
+func (s *RoundRobinSelector) pickFromAvailable(provider, model string, available []*Auth) (*Auth, error) {
+	key := provider + ":" + canonicalModelKey(model)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cursors == nil {
+		s.cursors = make(map[string]int)
+	}
+	limit := s.maxKeys
+	if limit <= 0 {
+		limit = 4096
+	}
+
+	groups, parentOrder := groupByVirtualParent(available)
+	if len(parentOrder) > 1 {
+		groupKey := key + "::group"
+		s.ensureCursorKey(groupKey, limit)
+		if _, exists := s.cursors[groupKey]; !exists {
+			s.cursors[groupKey] = rand.IntN(len(parentOrder))
+		}
+		groupIndex := s.cursors[groupKey]
+		if groupIndex >= 2_147_483_640 {
+			groupIndex = 0
+		}
+		s.cursors[groupKey] = groupIndex + 1
+
+		selectedParent := parentOrder[groupIndex%len(parentOrder)]
+		group := groups[selectedParent]
+
+		innerKey := key + "::cred:" + selectedParent
+		s.ensureCursorKey(innerKey, limit)
+		innerIndex := s.cursors[innerKey]
+		if innerIndex >= 2_147_483_640 {
+			innerIndex = 0
+		}
+		s.cursors[innerKey] = innerIndex + 1
+		return group[innerIndex%len(group)], nil
+	}
+
+	s.ensureCursorKey(key, limit)
+	index := s.cursors[key]
+	if index >= 2_147_483_640 {
+		index = 0
+	}
+	s.cursors[key] = index + 1
 	return available[index%len(available)], nil
+}
+
+func isAuthCurrentlyBlocked(auth *Auth, model string, now time.Time) bool {
+	blocked, _, _ := isAuthBlockedForModel(auth, model, now)
+	return blocked
 }
 
 // ensureCursorKey ensures the cursor map has capacity for the given key.
