@@ -251,6 +251,7 @@ func (e *QwenExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 
 	requestedModel := payloadRequestedModel(opts, req.Model)
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
+	body = ensureQwenExplicitCacheControl(baseModel, body)
 
 	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
@@ -363,6 +364,7 @@ func (e *QwenExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 	body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
 	requestedModel := payloadRequestedModel(opts, req.Model)
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
+	body = ensureQwenExplicitCacheControl(baseModel, body)
 
 	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
@@ -569,4 +571,124 @@ func resolveQwenUpstreamModel(model string) string {
 		}
 	}
 	return model
+}
+
+// ensureQwenExplicitCacheControl injects a single explicit cache marker for
+// models that support Qwen's cache_control-based prompt caching. The marker is
+// placed on the last cacheable message content block so subsequent turns can
+// reuse the longest possible prefix.
+func ensureQwenExplicitCacheControl(model string, payload []byte) []byte {
+	if !supportsQwenExplicitCache(model) {
+		return payload
+	}
+
+	messages := gjson.GetBytes(payload, "messages")
+	if !messages.Exists() || !messages.IsArray() {
+		return payload
+	}
+	if qwenMessagesHaveCacheControl(messages) {
+		return payload
+	}
+
+	lastMessageIdx := findLastQwenCacheableMessage(messages)
+	if lastMessageIdx < 0 {
+		return payload
+	}
+
+	contentPath := fmt.Sprintf("messages.%d.content", lastMessageIdx)
+	content := gjson.GetBytes(payload, contentPath)
+	switch {
+	case content.IsArray():
+		lastContentIdx := findLastQwenCacheableContentIndex(content)
+		if lastContentIdx < 0 {
+			return payload
+		}
+		cachePath := fmt.Sprintf("%s.%d.cache_control", contentPath, lastContentIdx)
+		result, err := sjson.SetBytes(payload, cachePath, map[string]string{"type": "ephemeral"})
+		if err != nil {
+			log.Warnf("failed to inject qwen cache_control into message content: %v", err)
+			return payload
+		}
+		return result
+	case content.Type == gjson.String:
+		text := content.String()
+		if strings.TrimSpace(text) == "" {
+			return payload
+		}
+		newContent := []map[string]any{{
+			"type": "text",
+			"text": text,
+			"cache_control": map[string]string{
+				"type": "ephemeral",
+			},
+		}}
+		result, err := sjson.SetBytes(payload, contentPath, newContent)
+		if err != nil {
+			log.Warnf("failed to inject qwen cache_control into string content: %v", err)
+			return payload
+		}
+		return result
+	default:
+		return payload
+	}
+}
+
+func supportsQwenExplicitCache(model string) bool {
+	switch strings.TrimSpace(model) {
+	case "qwen3.5-plus", "coder-model":
+		return true
+	default:
+		return false
+	}
+}
+
+func qwenMessagesHaveCacheControl(messages gjson.Result) bool {
+	hasCacheControl := false
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.IsArray() {
+			return true
+		}
+		content.ForEach(func(_, item gjson.Result) bool {
+			if item.Get("cache_control").Exists() {
+				hasCacheControl = true
+				return false
+			}
+			return true
+		})
+		return !hasCacheControl
+	})
+	return hasCacheControl
+}
+
+func findLastQwenCacheableMessage(messages gjson.Result) int {
+	lastIdx := -1
+	messages.ForEach(func(index, msg gjson.Result) bool {
+		switch msg.Get("role").String() {
+		case "system", "user", "assistant", "tool":
+		default:
+			return true
+		}
+
+		content := msg.Get("content")
+		switch {
+		case content.Type == gjson.String && strings.TrimSpace(content.String()) != "":
+			lastIdx = int(index.Int())
+		case content.IsArray() && findLastQwenCacheableContentIndex(content) >= 0:
+			lastIdx = int(index.Int())
+		}
+		return true
+	})
+	return lastIdx
+}
+
+func findLastQwenCacheableContentIndex(content gjson.Result) int {
+	lastIdx := -1
+	content.ForEach(func(index, item gjson.Result) bool {
+		if item.IsObject() {
+			lastIdx = int(index.Int())
+		}
+		return true
+	})
+	return lastIdx
 }

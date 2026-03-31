@@ -216,6 +216,9 @@ func parseOpenAIUsage(data []byte) usage.Detail {
 	if !cached.Exists() {
 		cached = usageNode.Get("input_tokens_details.cached_tokens")
 	}
+	if !cached.Exists() {
+		cached = usageNode.Get("cache_creation_input_tokens")
+	}
 	if cached.Exists() {
 		detail.CachedTokens = cached.Int()
 	}
@@ -244,6 +247,8 @@ func parseOpenAIStreamUsage(line []byte) (usage.Detail, bool) {
 		TotalTokens:  usageNode.Get("total_tokens").Int(),
 	}
 	if cached := usageNode.Get("prompt_tokens_details.cached_tokens"); cached.Exists() {
+		detail.CachedTokens = cached.Int()
+	} else if cached = usageNode.Get("cache_creation_input_tokens"); cached.Exists() {
 		detail.CachedTokens = cached.Int()
 	}
 	if reasoning := usageNode.Get("completion_tokens_details.reasoning_tokens"); reasoning.Exists() {

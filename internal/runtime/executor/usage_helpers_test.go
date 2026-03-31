@@ -41,3 +41,22 @@ func TestParseOpenAIUsageResponses(t *testing.T) {
 		t.Fatalf("reasoning tokens = %d, want %d", detail.ReasoningTokens, 9)
 	}
 }
+
+func TestParseOpenAIUsageCacheCreationFallback(t *testing.T) {
+	data := []byte(`{"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12,"cache_creation_input_tokens":8}}`)
+	detail := parseOpenAIUsage(data)
+	if detail.CachedTokens != 8 {
+		t.Fatalf("cached tokens = %d, want %d", detail.CachedTokens, 8)
+	}
+}
+
+func TestParseOpenAIStreamUsageCacheCreationFallback(t *testing.T) {
+	line := []byte(`data: {"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12,"cache_creation_input_tokens":6}}`)
+	detail, ok := parseOpenAIStreamUsage(line)
+	if !ok {
+		t.Fatal("parseOpenAIStreamUsage should report usage")
+	}
+	if detail.CachedTokens != 6 {
+		t.Fatalf("cached tokens = %d, want %d", detail.CachedTokens, 6)
+	}
+}

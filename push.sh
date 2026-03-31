@@ -11,8 +11,19 @@ echo -e "${BLUE}========================================${NC}"
 echo -e "${YELLOW}📦 推送代码到 GitHub${NC}"
 echo -e "${BLUE}========================================${NC}"
 
-# 显示并校准远程仓库
 EXPECTED_REMOTE="https://github.com/suyan599/cliproxyapi"
+
+# 确保当前目录是 Git 仓库
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo -e "${YELLOW}⚠️  当前目录不是 Git 仓库，正在初始化...${NC}"
+    git init >/dev/null 2>&1 || {
+        echo -e "${RED}❌ Git 初始化失败${NC}"
+        exit 1
+    }
+    git branch -M main >/dev/null 2>&1
+fi
+
+# 显示并校准远程仓库
 REMOTE_URL=$(git remote get-url origin 2>/dev/null)
 if [ -z "$REMOTE_URL" ]; then
     echo -e "${YELLOW}⚠️  未配置远程仓库，正在设置为 ${EXPECTED_REMOTE}${NC}"
@@ -25,6 +36,17 @@ elif [ "$REMOTE_URL" != "$EXPECTED_REMOTE" ]; then
 fi
 echo -e "${BLUE}📍 远程仓库: ${REMOTE_URL}${NC}"
 echo ""
+
+# 避免在“本地无提交、远程已有历史”时制造无关历史和 add/add 冲突
+if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+    if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
+        echo -e "${RED}❌ 本地仓库还没有提交，但远程 main 已经存在历史${NC}"
+        echo -e "${YELLOW}💡 请先同步远程基线，再重新运行脚本：${NC}"
+        echo -e "   git fetch origin main"
+        echo -e "   git reset --mixed origin/main"
+        exit 1
+    fi
+fi
 
 # 添加所有更改
 echo -e "${GREEN}1️⃣  添加所有更改...${NC}"
@@ -57,11 +79,15 @@ fi
 echo -e "${GREEN}3️⃣  推送到 ${REMOTE_URL}...${NC}"
 echo -e "${YELLOW}💡 提示：如果需要输入用户名和密码，请使用 GitHub Personal Access Token${NC}"
 
-# 先尝试拉取远程更改
-git pull origin main --rebase 2>/dev/null
-if [ $? -ne 0 ]; then
-    echo -e "${YELLOW}⚠️  检测到远程仓库有新内容，正在合并...${NC}"
-    git pull origin main --rebase --allow-unrelated-histories
+# 远程存在 main 分支时再尝试拉取，避免空仓库或首次推送时报错
+if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
+    git pull origin main --rebase 2>/dev/null
+    if [ $? -ne 0 ]; then
+        echo -e "${YELLOW}⚠️  检测到远程仓库有新内容，正在合并...${NC}"
+        git pull origin main --rebase --allow-unrelated-histories
+    fi
+else
+    echo -e "${BLUE}ℹ️  远程 main 分支不存在，跳过拉取${NC}"
 fi
 
 # 推送
