@@ -573,43 +573,139 @@ func resolveQwenUpstreamModel(model string) string {
 	return model
 }
 
-// ensureQwenExplicitCacheControl injects a single explicit cache marker for
-// models that support Qwen's cache_control-based prompt caching. The marker is
-// placed on the last cacheable message content block so subsequent turns can
-// reuse the longest possible prefix.
+// ensureQwenExplicitCacheControl injects cache_control breakpoints for models
+// that support Qwen's explicit prompt caching. Breakpoints are placed on:
+//
+//  1. The LAST system message content block — caches the system prompt prefix.
+//  2. The SECOND-TO-LAST user message — caches conversation history so only
+//     the latest user turn is uncached.
+//
+// This mirrors the standard strategy used by Claude/Anthropic prompt caching
+// and maximises Qwen's prefix-match hit rate (backward prefix matching on
+// the last 20 content blocks). If the payload already contains cache_control
+// markers the function is a no-op.
 func ensureQwenExplicitCacheControl(model string, payload []byte) []byte {
 	if !supportsQwenExplicitCache(model) {
 		return payload
 	}
 
+	if qwenPayloadHasCacheControl(payload) {
+		return payload
+	}
+
+	// 1. Inject cache_control on the last system message content block.
+	payload = injectQwenSystemCacheControl(payload)
+
+	// 2. Inject cache_control on the second-to-last user message.
+	payload = injectQwenMessagesCacheControl(payload)
+
+	return payload
+}
+
+func supportsQwenExplicitCache(model string) bool {
+	switch strings.TrimSpace(model) {
+	case "qwen3.5-plus", "coder-model":
+		return true
+	default:
+		return false
+	}
+}
+
+// qwenPayloadHasCacheControl returns true if any message content block in the
+// payload already carries a cache_control field.
+func qwenPayloadHasCacheControl(payload []byte) bool {
 	messages := gjson.GetBytes(payload, "messages")
-	if !messages.Exists() || !messages.IsArray() {
-		return payload
+	if !messages.IsArray() {
+		return false
 	}
-	if qwenMessagesHaveCacheControl(messages) {
+	found := false
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if content.IsArray() {
+			content.ForEach(func(_, item gjson.Result) bool {
+				if item.Get("cache_control").Exists() {
+					found = true
+					return false
+				}
+				return true
+			})
+		}
+		return !found
+	})
+	return found
+}
+
+// injectQwenSystemCacheControl adds cache_control to the last content block of
+// the first system message. String content is promoted to an array block.
+func injectQwenSystemCacheControl(payload []byte) []byte {
+	messages := gjson.GetBytes(payload, "messages")
+	if !messages.IsArray() {
 		return payload
 	}
 
-	lastMessageIdx := findLastQwenCacheableMessage(messages)
-	if lastMessageIdx < 0 {
+	systemIdx := -1
+	messages.ForEach(func(index, msg gjson.Result) bool {
+		if msg.Get("role").String() == "system" {
+			systemIdx = int(index.Int())
+			return false // take the first system message
+		}
+		return true
+	})
+	if systemIdx < 0 {
 		return payload
 	}
 
-	contentPath := fmt.Sprintf("messages.%d.content", lastMessageIdx)
+	return injectQwenCacheControlAtMessage(payload, systemIdx)
+}
+
+// injectQwenMessagesCacheControl adds cache_control to the second-to-last user
+// message. This ensures the conversation history prefix is cached while the
+// latest user turn (which changes every request) remains uncached.
+func injectQwenMessagesCacheControl(payload []byte) []byte {
+	messages := gjson.GetBytes(payload, "messages")
+	if !messages.IsArray() {
+		return payload
+	}
+
+	var userIndices []int
+	messages.ForEach(func(index, msg gjson.Result) bool {
+		if msg.Get("role").String() == "user" {
+			userIndices = append(userIndices, int(index.Int()))
+		}
+		return true
+	})
+
+	// Need at least 2 user turns; with only 1 turn there is no stable
+	// history prefix worth caching.
+	if len(userIndices) < 2 {
+		return payload
+	}
+
+	secondToLastIdx := userIndices[len(userIndices)-2]
+	return injectQwenCacheControlAtMessage(payload, secondToLastIdx)
+}
+
+// injectQwenCacheControlAtMessage adds {"cache_control":{"type":"ephemeral"}}
+// to the last content block of the message at msgIdx. If the content is a
+// plain string it is promoted to an array block first.
+func injectQwenCacheControlAtMessage(payload []byte, msgIdx int) []byte {
+	contentPath := fmt.Sprintf("messages.%d.content", msgIdx)
 	content := gjson.GetBytes(payload, contentPath)
+
 	switch {
 	case content.IsArray():
-		lastContentIdx := findLastQwenCacheableContentIndex(content)
-		if lastContentIdx < 0 {
+		count := int(content.Get("#").Int())
+		if count == 0 {
 			return payload
 		}
-		cachePath := fmt.Sprintf("%s.%d.cache_control", contentPath, lastContentIdx)
+		cachePath := fmt.Sprintf("%s.%d.cache_control", contentPath, count-1)
 		result, err := sjson.SetBytes(payload, cachePath, map[string]string{"type": "ephemeral"})
 		if err != nil {
-			log.Warnf("failed to inject qwen cache_control into message content: %v", err)
+			log.Warnf("failed to inject qwen cache_control into array content: %v", err)
 			return payload
 		}
 		return result
+
 	case content.Type == gjson.String:
 		text := content.String()
 		if strings.TrimSpace(text) == "" {
@@ -628,67 +724,8 @@ func ensureQwenExplicitCacheControl(model string, payload []byte) []byte {
 			return payload
 		}
 		return result
+
 	default:
 		return payload
 	}
-}
-
-func supportsQwenExplicitCache(model string) bool {
-	switch strings.TrimSpace(model) {
-	case "qwen3.5-plus", "coder-model":
-		return true
-	default:
-		return false
-	}
-}
-
-func qwenMessagesHaveCacheControl(messages gjson.Result) bool {
-	hasCacheControl := false
-	messages.ForEach(func(_, msg gjson.Result) bool {
-		content := msg.Get("content")
-		if !content.IsArray() {
-			return true
-		}
-		content.ForEach(func(_, item gjson.Result) bool {
-			if item.Get("cache_control").Exists() {
-				hasCacheControl = true
-				return false
-			}
-			return true
-		})
-		return !hasCacheControl
-	})
-	return hasCacheControl
-}
-
-func findLastQwenCacheableMessage(messages gjson.Result) int {
-	lastIdx := -1
-	messages.ForEach(func(index, msg gjson.Result) bool {
-		switch msg.Get("role").String() {
-		case "system", "user", "assistant", "tool":
-		default:
-			return true
-		}
-
-		content := msg.Get("content")
-		switch {
-		case content.Type == gjson.String && strings.TrimSpace(content.String()) != "":
-			lastIdx = int(index.Int())
-		case content.IsArray() && findLastQwenCacheableContentIndex(content) >= 0:
-			lastIdx = int(index.Int())
-		}
-		return true
-	})
-	return lastIdx
-}
-
-func findLastQwenCacheableContentIndex(content gjson.Result) int {
-	lastIdx := -1
-	content.ForEach(func(index, item gjson.Result) bool {
-		if item.IsObject() {
-			lastIdx = int(index.Int())
-		}
-		return true
-	})
-	return lastIdx
 }

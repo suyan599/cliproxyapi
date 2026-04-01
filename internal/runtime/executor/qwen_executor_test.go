@@ -28,41 +28,64 @@ func TestResolveQwenUpstreamModel(t *testing.T) {
 }
 
 func TestEnsureQwenExplicitCacheControl_StringContent(t *testing.T) {
+	// With 2 user turns: system gets cache, second-to-last user gets cache
 	input := []byte(`{
 		"model":"coder-model",
 		"messages":[
 			{"role":"system","content":"You are helpful"},
-			{"role":"user","content":"Cache this prompt"}
+			{"role":"user","content":"First question"},
+			{"role":"assistant","content":"First answer"},
+			{"role":"user","content":"Second question"}
 		]
 	}`)
 
 	output := ensureQwenExplicitCacheControl("qwen3.5-plus", input)
 
-	if got := gjson.GetBytes(output, "messages.1.content.0.cache_control.type").String(); got != "ephemeral" {
-		t.Fatalf("messages.1.content.0.cache_control.type = %q, want %q", got, "ephemeral")
+	// System message should have cache_control (promoted to array)
+	if got := gjson.GetBytes(output, "messages.0.content.0.cache_control.type").String(); got != "ephemeral" {
+		t.Fatalf("system cache_control.type = %q, want %q", got, "ephemeral")
 	}
-	if got := gjson.GetBytes(output, "messages.1.content.0.text").String(); got != "Cache this prompt" {
-		t.Fatalf("messages.1.content.0.text = %q, want %q", got, "Cache this prompt")
+	if got := gjson.GetBytes(output, "messages.0.content.0.text").String(); got != "You are helpful" {
+		t.Fatalf("system text = %q, want %q", got, "You are helpful")
+	}
+
+	// First user (second-to-last user) should have cache_control
+	if got := gjson.GetBytes(output, "messages.1.content.0.cache_control.type").String(); got != "ephemeral" {
+		t.Fatalf("second-to-last user cache_control.type = %q, want %q", got, "ephemeral")
+	}
+
+	// Last user message should NOT have cache_control
+	if gjson.GetBytes(output, "messages.3.content.0.cache_control").Exists() {
+		t.Fatal("last user message should NOT have cache_control")
 	}
 }
 
 func TestEnsureQwenExplicitCacheControl_ArrayContent(t *testing.T) {
 	input := []byte(`{
 		"messages":[
+			{"role":"system","content":[{"type":"text","text":"system prompt"}]},
 			{"role":"user","content":[
 				{"type":"text","text":"part 1"},
 				{"type":"text","text":"part 2"}
-			]}
+			]},
+			{"role":"assistant","content":"answer"},
+			{"role":"user","content":"latest question"}
 		]
 	}`)
 
 	output := ensureQwenExplicitCacheControl("coder-model", input)
 
-	if gjson.GetBytes(output, "messages.0.content.0.cache_control").Exists() {
-		t.Fatal("messages.0.content.0.cache_control should not be injected")
+	// System: last block (index 0) should have cache_control
+	if got := gjson.GetBytes(output, "messages.0.content.0.cache_control.type").String(); got != "ephemeral" {
+		t.Fatalf("system cache_control.type = %q, want %q", got, "ephemeral")
 	}
-	if got := gjson.GetBytes(output, "messages.0.content.1.cache_control.type").String(); got != "ephemeral" {
-		t.Fatalf("messages.0.content.1.cache_control.type = %q, want %q", got, "ephemeral")
+
+	// Second-to-last user (index 1): cache on last content block (index 1)
+	if gjson.GetBytes(output, "messages.1.content.0.cache_control").Exists() {
+		t.Fatal("messages.1.content.0 should NOT have cache_control (only last block gets it)")
+	}
+	if got := gjson.GetBytes(output, "messages.1.content.1.cache_control.type").String(); got != "ephemeral" {
+		t.Fatalf("messages.1.content.1.cache_control.type = %q, want %q", got, "ephemeral")
 	}
 }
 
@@ -70,17 +93,21 @@ func TestEnsureQwenExplicitCacheControl_PreservesExistingMarkers(t *testing.T) {
 	input := []byte(`{
 		"messages":[
 			{"role":"system","content":[{"type":"text","text":"cached","cache_control":{"type":"ephemeral"}}]},
-			{"role":"user","content":"do not touch"}
+			{"role":"user","content":"first"},
+			{"role":"assistant","content":"reply"},
+			{"role":"user","content":"second"}
 		]
 	}`)
 
 	output := ensureQwenExplicitCacheControl("qwen3.5-plus", input)
 
+	// Existing marker preserved
 	if got := gjson.GetBytes(output, "messages.0.content.0.cache_control.type").String(); got != "ephemeral" {
 		t.Fatalf("existing cache_control lost: got %q", got)
 	}
+	// No new markers injected (payload already has cache_control)
 	if gjson.GetBytes(output, "messages.1.content.0.cache_control").Exists() {
-		t.Fatal("new cache_control should not be injected when one already exists")
+		t.Fatal("should not inject new cache_control when existing markers present")
 	}
 }
 
@@ -91,5 +118,50 @@ func TestEnsureQwenExplicitCacheControl_UnsupportedModel(t *testing.T) {
 
 	if string(output) != string(input) {
 		t.Fatalf("unsupported model payload changed:\n got: %s\nwant: %s", output, input)
+	}
+}
+
+func TestEnsureQwenExplicitCacheControl_SingleUserTurn(t *testing.T) {
+	// Only 1 user turn: system gets cache, but no message cache (nothing stable to cache)
+	input := []byte(`{
+		"messages":[
+			{"role":"system","content":"You are helpful"},
+			{"role":"user","content":"Only question"}
+		]
+	}`)
+
+	output := ensureQwenExplicitCacheControl("qwen3.5-plus", input)
+
+	// System should still get cache_control
+	if got := gjson.GetBytes(output, "messages.0.content.0.cache_control.type").String(); got != "ephemeral" {
+		t.Fatalf("system cache_control.type = %q, want %q", got, "ephemeral")
+	}
+
+	// Single user message should NOT get cache_control
+	if gjson.GetBytes(output, "messages.1.content.0.cache_control").Exists() {
+		t.Fatal("single user turn should not get cache_control")
+	}
+}
+
+func TestEnsureQwenExplicitCacheControl_NoSystemMessage(t *testing.T) {
+	// No system message, but 2 user turns: only second-to-last user gets cache
+	input := []byte(`{
+		"messages":[
+			{"role":"user","content":"First"},
+			{"role":"assistant","content":"Reply"},
+			{"role":"user","content":"Second"}
+		]
+	}`)
+
+	output := ensureQwenExplicitCacheControl("coder-model", input)
+
+	// First user (second-to-last) should have cache_control
+	if got := gjson.GetBytes(output, "messages.0.content.0.cache_control.type").String(); got != "ephemeral" {
+		t.Fatalf("second-to-last user cache_control.type = %q, want %q", got, "ephemeral")
+	}
+
+	// Last user should NOT
+	if gjson.GetBytes(output, "messages.2.content.0.cache_control").Exists() {
+		t.Fatal("last user message should not get cache_control")
 	}
 }
