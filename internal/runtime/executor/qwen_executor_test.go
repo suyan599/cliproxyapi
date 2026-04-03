@@ -13,8 +13,8 @@ func TestResolveQwenUpstreamModel(t *testing.T) {
 		model string
 		want  string
 	}{
-		{name: "plus model uses upstream alias", model: "qwen3.5-plus", want: "coder-model"},
-		{name: "flash model keeps upstream name", model: "qwen3.5-flash", want: "qwen3.5-flash"},
+		{name: "plus model uses upstream alias", model: "qwen3.6-plus", want: "coder-model"},
+		{name: "flash model keeps upstream name", model: "qwen3.6-flash", want: "qwen3.6-flash"},
 		{name: "legacy model stays valid", model: "coder-model", want: "coder-model"},
 		{name: "unknown model passthrough", model: "custom-qwen-model", want: "custom-qwen-model"},
 	}
@@ -40,7 +40,7 @@ func TestEnsureQwenExplicitCacheControl_StringContent(t *testing.T) {
 		]
 	}`)
 
-	output := ensureQwenExplicitCacheControl("qwen3.5-plus", input)
+	output := ensureQwenExplicitCacheControl("qwen3.6-plus", input)
 
 	// System message should have cache_control (promoted to array)
 	if got := gjson.GetBytes(output, "messages.0.content.0.cache_control.type").String(); got != "ephemeral" {
@@ -100,7 +100,7 @@ func TestEnsureQwenExplicitCacheControl_PreservesExistingMarkers(t *testing.T) {
 		]
 	}`)
 
-	output := ensureQwenExplicitCacheControl("qwen3.5-plus", input)
+	output := ensureQwenExplicitCacheControl("qwen3.6-plus", input)
 
 	// Existing marker preserved
 	if got := gjson.GetBytes(output, "messages.0.content.0.cache_control.type").String(); got != "ephemeral" {
@@ -131,7 +131,7 @@ func TestEnsureQwenExplicitCacheControl_SingleUserTurn(t *testing.T) {
 		]
 	}`)
 
-	output := ensureQwenExplicitCacheControl("qwen3.5-plus", input)
+	output := ensureQwenExplicitCacheControl("qwen3.6-plus", input)
 
 	// System should still get cache_control
 	if got := gjson.GetBytes(output, "messages.0.content.0.cache_control.type").String(); got != "ephemeral" {
@@ -232,5 +232,75 @@ func TestEnsureQwenSystemPrompt_PreservesNonFirstSystemMessage(t *testing.T) {
 
 	if string(output) != string(input) {
 		t.Fatalf("payload changed even though a later system prompt already existed:\n got: %s\nwant: %s", output, input)
+	}
+}
+
+func TestSanitizeQwenSystemPrompt_StringContent(t *testing.T) {
+	input := []byte(`{
+		"messages":[
+			{"role":"system","content":"You are a personal assistant running inside OpenClaw.\nFollow the user's coding preferences."},
+			{"role":"user","content":"hello"}
+		]
+	}`)
+
+	output := sanitizeQwenSystemPrompt(input)
+
+	if got := gjson.GetBytes(output, "messages.0.content").String(); got != "You are a personal assistant inside OpenClaw.\nFollow the user's coding preferences." {
+		t.Fatalf("messages.0.content = %q", got)
+	}
+}
+
+func TestSanitizeQwenSystemPrompt_ArrayContent(t *testing.T) {
+	input := []byte(`{
+		"messages":[
+			{"role":"system","content":[
+				{"type":"text","text":"You are a personal assistant running inside OpenClaw.\nFollow the user's coding preferences."},
+				{"type":"text","text":"Leave this block untouched."}
+			]},
+			{"role":"user","content":"hello"}
+		]
+	}`)
+
+	output := sanitizeQwenSystemPrompt(input)
+
+	if got := gjson.GetBytes(output, "messages.0.content.0.text").String(); got != "You are a personal assistant inside OpenClaw.\nFollow the user's coding preferences." {
+		t.Fatalf("messages.0.content.0.text = %q", got)
+	}
+	if got := gjson.GetBytes(output, "messages.0.content.1.text").String(); got != "Leave this block untouched." {
+		t.Fatalf("messages.0.content.1.text = %q", got)
+	}
+}
+
+func TestSanitizeQwenSystemPrompt_NoOpForOtherText(t *testing.T) {
+	input := []byte(`{
+		"messages":[
+			{"role":"system","content":"You are a personal assistant inside OpenClaw."},
+			{"role":"user","content":"hello"}
+		]
+	}`)
+
+	output := sanitizeQwenSystemPrompt(input)
+
+	if string(output) != string(input) {
+		t.Fatalf("payload unexpectedly changed:\n got: %s\nwant: %s", output, input)
+	}
+}
+
+func TestSanitizeQwenSystemPrompt_OnlyFirstSystemMessage(t *testing.T) {
+	input := []byte(`{
+		"messages":[
+			{"role":"system","content":"You are a personal assistant running inside OpenClaw."},
+			{"role":"user","content":"hello"},
+			{"role":"system","content":"You are a personal assistant running inside OpenClaw."}
+		]
+	}`)
+
+	output := sanitizeQwenSystemPrompt(input)
+
+	if got := gjson.GetBytes(output, "messages.0.content").String(); got != "You are a personal assistant inside OpenClaw." {
+		t.Fatalf("messages.0.content = %q", got)
+	}
+	if got := gjson.GetBytes(output, "messages.2.content").String(); got != "You are a personal assistant running inside OpenClaw." {
+		t.Fatalf("messages.2.content = %q", got)
 	}
 }

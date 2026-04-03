@@ -16,7 +16,6 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v6/sdk/translator"
@@ -257,8 +256,8 @@ func (e *QwenExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 	requestedModel := payloadRequestedModel(opts, req.Model)
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
 	body = ensureQwenSystemPrompt(body)
+	body = sanitizeQwenSystemPrompt(body)
 	body = ensureQwenExplicitCacheControl(baseModel, body)
-	body = sanitizeQwenPayload(body)
 
 	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
@@ -372,8 +371,8 @@ func (e *QwenExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 	requestedModel := payloadRequestedModel(opts, req.Model)
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
 	body = ensureQwenSystemPrompt(body)
+	body = sanitizeQwenSystemPrompt(body)
 	body = ensureQwenExplicitCacheControl(baseModel, body)
-	body = sanitizeQwenPayload(body)
 
 	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
@@ -460,6 +459,7 @@ func (e *QwenExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Auth,
 	to := sdktranslator.FromString("openai")
 	body := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, false)
 	body = ensureQwenSystemPrompt(body)
+	body = sanitizeQwenSystemPrompt(body)
 
 	modelName := gjson.GetBytes(body, "model").String()
 	if strings.TrimSpace(modelName) == "" {
@@ -619,6 +619,85 @@ func ensureQwenSystemPrompt(payload []byte) []byte {
 	return result
 }
 
+const (
+	qwenProblematicSystemPromptOpening = "You are a personal assistant running inside OpenClaw."
+	qwenSafeSystemPromptOpening        = "You are a personal assistant inside OpenClaw."
+)
+
+func sanitizeQwenSystemPrompt(payload []byte) []byte {
+	if len(payload) == 0 {
+		return payload
+	}
+
+	messages := gjson.GetBytes(payload, "messages")
+	if !messages.IsArray() {
+		return payload
+	}
+
+	systemIdx := -1
+	var content gjson.Result
+	messages.ForEach(func(index, message gjson.Result) bool {
+		if message.Get("role").String() == "system" {
+			systemIdx = int(index.Int())
+			content = message.Get("content")
+			return false
+		}
+		return true
+	})
+	if systemIdx < 0 {
+		return payload
+	}
+
+	switch {
+	case content.Type == gjson.String:
+		updated, changed := sanitizeQwenSystemPromptText(content.String())
+		if !changed {
+			return payload
+		}
+		result, err := sjson.SetBytes(payload, fmt.Sprintf("messages.%d.content", systemIdx), updated)
+		if err != nil {
+			log.Warnf("failed to sanitize qwen system prompt string content: %v", err)
+			return payload
+		}
+		return result
+
+	case content.IsArray():
+		textBlockIdx := -1
+		var updated string
+		content.ForEach(func(index, item gjson.Result) bool {
+			if item.Get("type").String() != "text" {
+				return true
+			}
+			var changed bool
+			updated, changed = sanitizeQwenSystemPromptText(item.Get("text").String())
+			if changed {
+				textBlockIdx = int(index.Int())
+				return false
+			}
+			return true
+		})
+		if textBlockIdx < 0 {
+			return payload
+		}
+		result, err := sjson.SetBytes(payload, fmt.Sprintf("messages.%d.content.%d.text", systemIdx, textBlockIdx), updated)
+		if err != nil {
+			log.Warnf("failed to sanitize qwen system prompt array content: %v", err)
+			return payload
+		}
+		return result
+
+	default:
+		return payload
+	}
+}
+
+func sanitizeQwenSystemPromptText(text string) (string, bool) {
+	if !strings.HasPrefix(text, qwenProblematicSystemPromptOpening) {
+		return text, false
+	}
+	return qwenSafeSystemPromptOpening + strings.TrimPrefix(text, qwenProblematicSystemPromptOpening), true
+}
+
 func qwenPayloadHasSystemMessage(messages gjson.Result) bool {
 	found := false
 	messages.ForEach(func(_, message gjson.Result) bool {
@@ -662,7 +741,7 @@ func ensureQwenExplicitCacheControl(model string, payload []byte) []byte {
 
 func supportsQwenExplicitCache(model string) bool {
 	switch strings.TrimSpace(model) {
-	case "qwen3.5-plus", "coder-model":
+	case "qwen3.6-plus", "coder-model":
 		return true
 	default:
 		return false
@@ -786,198 +865,4 @@ func injectQwenCacheControlAtMessage(payload []byte, msgIdx int) []byte {
 	default:
 		return payload
 	}
-}
-
-// sanitizeQwenPayload cleans the request payload to be compatible with the Qwen
-// upstream API. It handles three issues that third-party clients (e.g. OpenClaw)
-// send but Qwen rejects with HTTP 400:
-//
-//  1. Content arrays → plain strings for non-system messages
-//  2. Consecutive same-role messages → merged into one
-//  3. Unsupported JSON Schema keywords in tool definitions → stripped
-func sanitizeQwenPayload(payload []byte) []byte {
-	payload = flattenQwenContentArrays(payload)
-	payload = mergeQwenConsecutiveMessages(payload)
-	payload = cleanQwenToolSchemas(payload)
-	return payload
-}
-
-// flattenQwenContentArrays converts content arrays to plain strings for user,
-// assistant, and tool messages. System messages are left alone because the Qwen
-// API supports array content there and existing code relies on that format.
-func flattenQwenContentArrays(payload []byte) []byte {
-	messages := gjson.GetBytes(payload, "messages")
-	if !messages.IsArray() {
-		return payload
-	}
-
-	changed := false
-	var result []any
-	messages.ForEach(func(_, msg gjson.Result) bool {
-		role := msg.Get("role").String()
-		content := msg.Get("content")
-
-		// Only flatten for non-system roles where content is an array
-		if role != "system" && content.IsArray() {
-			var parts []string
-			content.ForEach(func(_, item gjson.Result) bool {
-				if item.Get("type").String() == "text" || item.Get("type").String() == "" {
-					text := item.Get("text").String()
-					if text != "" {
-						parts = append(parts, text)
-					}
-				}
-				return true
-			})
-			flat := strings.Join(parts, "\n")
-			// Rebuild the message with string content
-			m := make(map[string]any)
-			msg.ForEach(func(key, val gjson.Result) bool {
-				if key.String() == "content" {
-					m["content"] = flat
-				} else {
-					m[key.String()] = val.Value()
-				}
-				return true
-			})
-			result = append(result, m)
-			changed = true
-		} else {
-			result = append(result, msg.Value())
-		}
-		return true
-	})
-
-	if !changed {
-		return payload
-	}
-
-	out, err := sjson.SetBytes(payload, "messages", result)
-	if err != nil {
-		log.Warnf("qwen: failed to flatten content arrays: %v", err)
-		return payload
-	}
-	return out
-}
-
-// mergeQwenConsecutiveMessages merges consecutive messages with the same role
-// by concatenating their content with a double newline. This is needed because
-// some clients (e.g. OpenClaw) send duplicate user messages that Qwen rejects.
-// Messages with tool_calls or tool_call_id are never merged.
-func mergeQwenConsecutiveMessages(payload []byte) []byte {
-	messages := gjson.GetBytes(payload, "messages")
-	if !messages.IsArray() {
-		return payload
-	}
-
-	arr := messages.Array()
-	if len(arr) < 2 {
-		return payload
-	}
-
-	changed := false
-	var merged []any
-
-	for i := 0; i < len(arr); i++ {
-		msg := arr[i]
-		role := msg.Get("role").String()
-
-		// Never merge messages that have tool_calls or tool_call_id
-		if msg.Get("tool_calls").Exists() || msg.Get("tool_call_id").Exists() {
-			merged = append(merged, msg.Value())
-			continue
-		}
-
-		content := msg.Get("content").String()
-
-		// Look ahead and merge consecutive same-role messages (without tool fields)
-		for i+1 < len(arr) {
-			next := arr[i+1]
-			if next.Get("role").String() != role {
-				break
-			}
-			if next.Get("tool_calls").Exists() || next.Get("tool_call_id").Exists() {
-				break
-			}
-			nextContent := next.Get("content").String()
-			if content != "" && nextContent != "" {
-				content = content + "\n\n" + nextContent
-			} else if nextContent != "" {
-				content = nextContent
-			}
-			i++
-			changed = true
-		}
-
-		m := make(map[string]any)
-		msg.ForEach(func(key, val gjson.Result) bool {
-			if key.String() == "content" {
-				m["content"] = content
-			} else {
-				m[key.String()] = val.Value()
-			}
-			return true
-		})
-		merged = append(merged, m)
-	}
-
-	if !changed {
-		return payload
-	}
-
-	out, err := sjson.SetBytes(payload, "messages", merged)
-	if err != nil {
-		log.Warnf("qwen: failed to merge consecutive messages: %v", err)
-		return payload
-	}
-	return out
-}
-
-// cleanQwenToolSchemas strips unsupported JSON Schema keywords (additionalProperties,
-// patternProperties, etc.) from tool parameter definitions. Qwen rejects these
-// keywords similarly to Gemini.
-func cleanQwenToolSchemas(payload []byte) []byte {
-	tools := gjson.GetBytes(payload, "tools")
-	if !tools.IsArray() || len(tools.Array()) == 0 {
-		return payload
-	}
-
-	changed := false
-	var cleanedTools []any
-	tools.ForEach(func(_, tool gjson.Result) bool {
-		params := tool.Get("function.parameters")
-		if !params.Exists() || !params.IsObject() {
-			cleanedTools = append(cleanedTools, tool.Value())
-			return true
-		}
-
-		original := params.Raw
-		cleaned := util.CleanJSONSchemaForGemini(original)
-		if cleaned == original {
-			cleanedTools = append(cleanedTools, tool.Value())
-			return true
-		}
-
-		// Rebuild the tool with cleaned parameters
-		t := tool.Value()
-		if m, ok := t.(map[string]any); ok {
-			if fn, ok := m["function"].(map[string]any); ok {
-				fn["parameters"] = gjson.Parse(cleaned).Value()
-			}
-		}
-		cleanedTools = append(cleanedTools, t)
-		changed = true
-		return true
-	})
-
-	if !changed {
-		return payload
-	}
-
-	out, err := sjson.SetBytes(payload, "tools", cleanedTools)
-	if err != nil {
-		log.Warnf("qwen: failed to clean tool schemas: %v", err)
-		return payload
-	}
-	return out
 }
