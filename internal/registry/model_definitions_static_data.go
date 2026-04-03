@@ -936,7 +936,7 @@ func GetQwenModels() []*ModelInfo {
 			SupportedParameters: []string{"temperature", "top_p", "max_tokens", "stream", "stop"},
 		},
 		{
-			ID:                  "qwen3.5-plus",
+			ID:                  "qwen3.6-plus",
 			Object:              "model",
 			Created:             1771171200,
 			OwnedBy:             "qwen",
