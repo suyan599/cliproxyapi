@@ -589,13 +589,8 @@ func ensureQwenSystemPrompt(payload []byte) []byte {
 		return payload
 	}
 
-	if qwenPayloadHasRequiredSystemPrompt(messages) {
+	if qwenPayloadHasSystemMessage(messages) {
 		return payload
-	}
-
-	firstRole := gjson.GetBytes(payload, "messages.0.role").String()
-	if firstRole == "system" {
-		return prependQwenSystemPromptToFirstMessage(payload)
 	}
 
 	systemMessage := map[string]any{
@@ -621,84 +616,16 @@ func ensureQwenSystemPrompt(payload []byte) []byte {
 	return result
 }
 
-func qwenPayloadHasRequiredSystemPrompt(messages gjson.Result) bool {
+func qwenPayloadHasSystemMessage(messages gjson.Result) bool {
 	found := false
 	messages.ForEach(func(_, message gjson.Result) bool {
-		if message.Get("role").String() != "system" {
-			return true
-		}
-		if qwenMessageContentHasSystemPrompt(message.Get("content")) {
+		if message.Get("role").String() == "system" {
 			found = true
 			return false
 		}
 		return true
 	})
 	return found
-}
-
-func qwenMessageContentHasSystemPrompt(content gjson.Result) bool {
-	switch {
-	case content.Type == gjson.String:
-		return strings.Contains(content.String(), qwenSystemPromptKey)
-	case content.IsArray():
-		found := false
-		content.ForEach(func(_, item gjson.Result) bool {
-			if strings.Contains(item.Get("text").String(), qwenSystemPromptKey) {
-				found = true
-				return false
-			}
-			return true
-		})
-		return found
-	default:
-		return false
-	}
-}
-
-func prependQwenSystemPromptToFirstMessage(payload []byte) []byte {
-	contentPath := "messages.0.content"
-	content := gjson.GetBytes(payload, contentPath)
-	promptBlock := map[string]string{
-		"type": "text",
-		"text": qwenCodeSystemPrompt,
-	}
-
-	switch {
-	case content.IsArray():
-		newContent := make([]any, 0, len(content.Array())+1)
-		newContent = append(newContent, promptBlock)
-		content.ForEach(func(_, item gjson.Result) bool {
-			newContent = append(newContent, item.Value())
-			return true
-		})
-		result, err := sjson.SetBytes(payload, contentPath, newContent)
-		if err != nil {
-			log.Warnf("failed to prepend qwen system prompt to array content: %v", err)
-			return payload
-		}
-		return result
-	case content.Type == gjson.String:
-		newContent := []map[string]string{promptBlock}
-		if text := strings.TrimSpace(content.String()); text != "" {
-			newContent = append(newContent, map[string]string{
-				"type": "text",
-				"text": content.String(),
-			})
-		}
-		result, err := sjson.SetBytes(payload, contentPath, newContent)
-		if err != nil {
-			log.Warnf("failed to prepend qwen system prompt to string content: %v", err)
-			return payload
-		}
-		return result
-	default:
-		result, err := sjson.SetBytes(payload, contentPath, []map[string]string{promptBlock})
-		if err != nil {
-			log.Warnf("failed to initialize qwen system prompt content: %v", err)
-			return payload
-		}
-		return result
-	}
 }
 
 // ensureQwenExplicitCacheControl injects cache_control breakpoints for models

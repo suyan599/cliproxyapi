@@ -187,7 +187,7 @@ func TestEnsureQwenSystemPrompt_InsertsFirstSystemMessage(t *testing.T) {
 	}
 }
 
-func TestEnsureQwenSystemPrompt_PrependsExistingFirstSystemMessage(t *testing.T) {
+func TestEnsureQwenSystemPrompt_PreservesExistingFirstSystemMessage(t *testing.T) {
 	input := []byte(`{
 		"messages":[
 			{"role":"system","content":"custom system"},
@@ -197,11 +197,8 @@ func TestEnsureQwenSystemPrompt_PrependsExistingFirstSystemMessage(t *testing.T)
 
 	output := ensureQwenSystemPrompt(input)
 
-	if got := gjson.GetBytes(output, "messages.0.content.0.text").String(); !strings.Contains(got, qwenSystemPromptKey) {
-		t.Fatalf("messages.0.content.0.text missing qwen system prompt marker: %q", got)
-	}
-	if got := gjson.GetBytes(output, "messages.0.content.1.text").String(); got != "custom system" {
-		t.Fatalf("messages.0.content.1.text = %q, want %q", got, "custom system")
+	if string(output) != string(input) {
+		t.Fatalf("payload changed even though a system prompt already existed:\n got: %s\nwant: %s", output, input)
 	}
 }
 
@@ -220,5 +217,20 @@ func TestEnsureQwenSystemPrompt_DoesNotDuplicateExistingPrompt(t *testing.T) {
 
 	if string(output) != string(input) {
 		t.Fatalf("payload changed even though qwen system prompt already existed:\n got: %s\nwant: %s", output, input)
+	}
+}
+
+func TestEnsureQwenSystemPrompt_PreservesNonFirstSystemMessage(t *testing.T) {
+	input := []byte(`{
+		"messages":[
+			{"role":"user","content":"hello"},
+			{"role":"system","content":"custom system"}
+		]
+	}`)
+
+	output := ensureQwenSystemPrompt(input)
+
+	if string(output) != string(input) {
+		t.Fatalf("payload changed even though a later system prompt already existed:\n got: %s\nwant: %s", output, input)
 	}
 }
