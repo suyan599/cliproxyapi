@@ -256,7 +256,7 @@ func (e *QwenExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 	requestedModel := payloadRequestedModel(opts, req.Model)
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
 	body = ensureQwenSystemPrompt(body)
-	// body = ensureQwenExplicitCacheControl(baseModel, body) // disabled: upstream Qwen API rejects cache_control fields
+	body = ensureQwenExplicitCacheControl(baseModel, body)
 
 	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
@@ -370,7 +370,7 @@ func (e *QwenExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 	requestedModel := payloadRequestedModel(opts, req.Model)
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
 	body = ensureQwenSystemPrompt(body)
-	// body = ensureQwenExplicitCacheControl(baseModel, body) // disabled: upstream Qwen API rejects cache_control fields
+	body = ensureQwenExplicitCacheControl(baseModel, body)
 
 	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
