@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	qwenUserAgent       = "QwenCode/0.14.0 (win32; x64)"
+	qwenUserAgent       = "QwenCode/0.13.2 (darwin; arm64)"
 	qwenRateLimitPerMin = 60          // 60 requests per minute per credential
 	qwenRateLimitWindow = time.Minute // sliding window duration
 )
@@ -251,7 +251,7 @@ func (e *QwenExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 
 	requestedModel := payloadRequestedModel(opts, req.Model)
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
-	body = ensureQwenExplicitCacheControl(baseModel, body)
+	// body = ensureQwenExplicitCacheControl(baseModel, body) // disabled: upstream Qwen API rejects cache_control fields
 
 	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
@@ -364,7 +364,7 @@ func (e *QwenExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 	body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
 	requestedModel := payloadRequestedModel(opts, req.Model)
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
-	body = ensureQwenExplicitCacheControl(baseModel, body)
+	// body = ensureQwenExplicitCacheControl(baseModel, body) // disabled: upstream Qwen API rejects cache_control fields
 
 	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
@@ -515,16 +515,15 @@ func applyQwenHeaders(r *http.Request, token string, stream bool) {
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+token)
 	r.Header.Set("User-Agent", qwenUserAgent)
-	r.Header.Set("X-DashScope-UserAgent", qwenUserAgent)
-	r.Header.Set("X-Stainless-Runtime-Version", "v24.11.1")
-	r.Header.Set("Sec-Fetch-Mode", "cors")
+	r.Header["X-DashScope-UserAgent"] = []string{qwenUserAgent}
+	r.Header.Set("X-Stainless-Runtime-Version", "v22.17.0")
 	r.Header.Set("X-Stainless-Lang", "js")
-	r.Header.Set("X-Stainless-Arch", "x64")
+	r.Header.Set("X-Stainless-Arch", "arm64")
 	r.Header.Set("X-Stainless-Package-Version", "5.11.0")
-	r.Header.Set("X-DashScope-CacheControl", "enable")
+	r.Header["X-DashScope-CacheControl"] = []string{"enable"}
 	r.Header.Set("X-Stainless-Retry-Count", "0")
-	r.Header.Set("X-Stainless-Os", "Windows")
-	r.Header.Set("X-DashScope-AuthType", "qwen-oauth")
+	r.Header.Set("X-Stainless-Os", "MacOS")
+	r.Header["X-DashScope-AuthType"] = []string{"qwen-oauth"}
 	r.Header.Set("X-Stainless-Runtime", "node")
 
 	if stream {
