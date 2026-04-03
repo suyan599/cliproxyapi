@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NVAI Admin</title>
+<style>
+:root {
+  --bg: #e8eaed;
+  --card: #e0e2e6;
+  --text: #1d1d1f;
+  --text2: #6e6e73;
+  --green: #30d158;
+  --green-bg: rgba(48,209,88,.12);
+  --red: #ff453a;
+  --red-bg: rgba(255,69,58,.10);
+  --orange: #ff9f0a;
+  --orange-bg: rgba(255,159,10,.10);
+  --accent: #1a8a5c;
+  --shadow-out: 6px 6px 12px rgba(0,0,0,.08), -6px -6px 12px rgba(255,255,255,.7);
+  --shadow-in: inset 4px 4px 8px rgba(0,0,0,.06), inset -4px -4px 8px rgba(255,255,255,.6);
+  --shadow-btn: 3px 3px 6px rgba(0,0,0,.08), -3px -3px 6px rgba(255,255,255,.7);
+  --radius: 16px;
+  --radius-sm: 10px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Login Screen ──────────────────────── */
+.login-screen {
+  position:fixed; inset:0;
+  background: var(--bg);
+  display:flex; align-items:center; justify-content:center;
+  z-index: 300;
+  transition: opacity .4s, transform .4s;
+}
+.login-screen.hidden {
+  opacity:0; pointer-events:none; transform:scale(1.02);
+}
+.login-box {
+  width: 380px;
+  max-width: 90vw;
+  text-align: center;
+}
+.login-logo {
+  font-size: 42px;
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  margin-bottom: 6px;
+}
+.login-logo span { color: var(--accent); }
+.login-subtitle {
+  font-size: 14px;
+  color: var(--text2);
+  margin-bottom: 36px;
+}
+.login-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-out);
+  padding: 32px 28px;
+}
+.login-card .form-group { margin-bottom: 20px; text-align:left; }
+.login-card .form-label { margin-bottom:8px; }
+.login-input-wrap {
+  position:relative;
+}
+.login-input-wrap .form-input {
+  padding-right: 44px;
+}
+.login-toggle-vis {
+  position:absolute; right:10px; top:50%; transform:translateY(-50%);
+  background:none; border:none; cursor:pointer;
+  color:var(--text2); font-size:16px; padding:4px;
+  line-height:1;
+}
+.login-toggle-vis:hover { color:var(--text); }
+.login-btn {
+  width: 100%;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: none;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(26,138,92,.25);
+  transition: all .15s;
+  font-family: inherit;
+  margin-top: 4px;
+}
+.login-btn:hover { opacity:.9; box-shadow: 0 2px 8px rgba(26,138,92,.2); }
+.login-btn:active { transform:scale(.98); }
+.login-error {
+  color: var(--red);
+  font-size: 13px;
+  margin-top: 12px;
+  min-height: 20px;
+}
+.login-remember {
+  display:flex; align-items:center; gap:8px;
+  font-size:13px; color:var(--text2); margin-top:12px; text-align:left;
+}
+.login-remember input { accent-color:var(--accent); }
+
+/* ── Layout ────────────────────────────── */
+.app { display:flex; min-height:100vh; }
+.sidebar {
+  width: 220px;
+  padding: 32px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.logo { font-size:22px; font-weight:700; padding:0 12px 24px; letter-spacing:-.5px; }
+.logo span { color:var(--accent); }
+.nav-item {
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text2);
+  transition: all .15s;
+  display:flex; align-items:center; gap:8px;
+}
+.nav-item:hover { color:var(--text); background:rgba(0,0,0,.03); }
+.nav-item.active {
+  background: var(--card);
+  box-shadow: var(--shadow-out);
+  color: var(--text);
+}
+.nav-icon { font-size:16px; width:20px; text-align:center; }
+
+.main {
+  flex:1;
+  padding: 32px 40px;
+  max-width: 1100px;
+  overflow-y: auto;
+}
+.page-title { font-size:28px; font-weight:700; margin-bottom:24px; letter-spacing:-.5px; }
+
+/* ── Cards ─────────────────────────────── */
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-out);
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.card-title { font-size:13px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.5px; margin-bottom:16px; }
+
+.stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:24px; }
+.stat-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-out);
+  padding: 20px 24px;
+  text-align: center;
+}
+.stat-value { font-size:36px; font-weight:700; letter-spacing:-1px; line-height:1.1; }
+.stat-label { font-size:12px; color:var(--text2); margin-top:6px; font-weight:500; text-transform:uppercase; letter-spacing:.5px; }
+
+/* ── Key Cards ─────────────────────────── */
+.key-list { display:flex; flex-direction:column; gap:12px; }
+.key-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-out);
+  padding: 18px 22px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: transform .1s;
+}
+.key-card:hover { transform:translateY(-1px); }
+.key-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.key-dot.healthy { background:var(--green); box-shadow:0 0 6px var(--green); }
+.key-dot.unhealthy { background:var(--red); box-shadow:0 0 6px var(--red); }
+.key-dot.warning { background:var(--orange); box-shadow:0 0 6px var(--orange); }
+.key-dot.disabled { background:#aaa; }
+.key-info { flex:1; min-width:0; }
+.key-name { font-size:15px; font-weight:600; }
+.key-value { font-size:12px; color:var(--text2); font-family:'SF Mono',SFMono-Regular,Menlo,monospace; margin-top:2px; }
+.key-stats { display:flex; gap:16px; font-size:12px; color:var(--text2); margin-top:4px; }
+.key-meta { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:12px; color:var(--text2); margin-top:8px; }
+.key-stats .ok { color:var(--green); }
+.key-stats .fail { color:var(--red); }
+.key-actions { display:flex; gap:6px; flex-shrink:0; }
+
+.probe-pill {
+  display:inline-flex; align-items:center;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:11px; font-weight:600;
+}
+.probe-pill.healthy { background:var(--green-bg); color:#1a7a3e; }
+.probe-pill.invalid { background:var(--red-bg); color:#c0392b; }
+.probe-pill.error { background:var(--orange-bg); color:#a76200; }
+.probe-pill.checking { background:rgba(26,138,92,.12); color:var(--accent); }
+.probe-pill.never-checked { background:rgba(0,0,0,.06); color:var(--text2); }
+
+/* ── Buttons ───────────────────────────── */
+.btn {
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: none;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--card);
+  box-shadow: var(--shadow-btn);
+  color: var(--text);
+  transition: all .1s;
+  font-family: inherit;
+}
+.btn:hover { box-shadow: var(--shadow-in); }
+.btn:active { box-shadow: var(--shadow-in); transform:scale(.97); }
+.btn:disabled { opacity:.55; cursor:not-allowed; box-shadow: var(--shadow-in); }
+.btn:disabled:active { transform:none; }
+.btn-primary { background:var(--accent); color:#fff; box-shadow:0 2px 8px rgba(26,138,92,.3); }
+.btn-primary:hover { opacity:.9; box-shadow:0 1px 4px rgba(26,138,92,.2); }
+.btn-danger { color:var(--red); }
+.btn-sm { padding:6px 12px; font-size:12px; }
+.btn-icon { padding:6px 10px; font-size:14px; }
+
+/* ── Toggle Switch ─────────────────────── */
+.toggle {
+  position:relative; width:42px; height:24px; cursor:pointer; flex-shrink:0;
+}
+.toggle input { display:none; }
+.toggle-track {
+  width:100%; height:100%;
+  border-radius: 12px;
+  background: #ccc;
+  box-shadow: var(--shadow-in);
+  transition: background .2s;
+}
+.toggle input:checked + .toggle-track { background:var(--green); }
+.toggle-knob {
+  position:absolute; top:3px; left:3px;
+  width:18px; height:18px;
+  border-radius:50%;
+  background:#fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  transition: transform .2s;
+}
+.toggle input:checked ~ .toggle-knob { transform:translateX(18px); }
+
+/* ── Modal ─────────────────────────────── */
+.overlay {
+  position:fixed; inset:0;
+  background:rgba(0,0,0,.3);
+  backdrop-filter:blur(6px);
+  -webkit-backdrop-filter:blur(6px);
+  display:flex; align-items:center; justify-content:center;
+  z-index:100;
+  opacity:0; pointer-events:none;
+  transition:opacity .2s;
+}
+.overlay.show { opacity:1; pointer-events:auto; }
+.modal {
+  background:var(--bg);
+  border-radius:var(--radius);
+  box-shadow: 0 20px 60px rgba(0,0,0,.15);
+  padding:28px;
+  width:420px;
+  max-width:90vw;
+  transform:scale(.95);
+  transition:transform .2s;
+}
+.overlay.show .modal { transform:scale(1); }
+.modal-title { font-size:18px; font-weight:700; margin-bottom:20px; }
+
+/* ── Form ──────────────────────────────── */
+.form-group { margin-bottom:16px; }
+.form-label { display:block; font-size:12px; font-weight:600; color:var(--text2); margin-bottom:6px; text-transform:uppercase; letter-spacing:.5px; }
+.form-input {
+  width:100%;
+  padding:10px 14px;
+  border:none;
+  border-radius:var(--radius-sm);
+  background:var(--card);
+  box-shadow:var(--shadow-in);
+  font-size:14px;
+  font-family:inherit;
+  color:var(--text);
+  outline:none;
+  transition:box-shadow .15s;
+}
+.form-input:focus {
+  box-shadow: var(--shadow-in), 0 0 0 2px var(--accent);
+}
+.form-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
+
+/* ── Settings ──────────────────────────── */
+.settings-grid { display:flex; flex-direction:column; gap:14px; }
+.setting-row {
+  display:flex; align-items:center; gap:16px;
+}
+.setting-row .form-label { margin:0; min-width:180px; flex-shrink:0; }
+.setting-row .form-input { flex:1; }
+
+/* ── Model Alias ──────────────────────── */
+.alias-card {
+  background:var(--card);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-out);
+  padding:16px 22px;
+  display:flex; align-items:center; gap:16px;
+  transition:transform .1s;
+}
+.alias-card:hover { transform:translateY(-1px); }
+.alias-arrow { color:var(--accent); font-size:18px; font-weight:700; flex-shrink:0; }
+.alias-name { font-size:15px; font-weight:600; }
+.alias-target { font-size:12px; color:var(--text2); font-family:'SF Mono',SFMono-Regular,Menlo,monospace; margin-top:2px; }
+.alias-info { flex:1; min-width:0; }
+.alias-actions { display:flex; gap:6px; flex-shrink:0; }
+
+.form-select {
+  width:100%;
+  padding:10px 14px;
+  border:none;
+  border-radius:var(--radius-sm);
+  background:var(--card);
+  box-shadow:var(--shadow-in);
+  font-size:14px;
+  font-family:inherit;
+  color:var(--text);
+  outline:none;
+  appearance:none;
+  -webkit-appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236e6e73' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 12px center;
+  padding-right:32px;
+  cursor:pointer;
+}
+.form-select:focus { box-shadow:var(--shadow-in), 0 0 0 2px var(--accent); }
+.select-filter {
+  margin-bottom:8px;
+}
+.select-filter .form-input {
+  font-size:13px; padding:8px 12px;
+}
+
+/* ── Toast ─────────────────────────────── */
+.toast-container { position:fixed; top:20px; right:20px; z-index:200; display:flex; flex-direction:column; gap:8px; }
+.toast {
+  padding:12px 20px;
+  border-radius:var(--radius-sm);
+  font-size:13px; font-weight:500;
+  box-shadow:0 4px 16px rgba(0,0,0,.12);
+  animation: toast-in .25s ease;
+  max-width: 360px;
+}
+.toast.success { background:var(--green-bg); color:#1a7a3e; border-left:3px solid var(--green); }
+.toast.error { background:var(--red-bg); color:#c0392b; border-left:3px solid var(--red); }
+@keyframes toast-in { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }
+
+/* ── Connection status ─────────────────── */
+.conn-badge {
+  display:inline-flex; align-items:center; gap:6px;
+  font-size:12px; font-weight:500; color:var(--text2);
+  padding:6px 12px;
+  border-radius:20px;
+  background:var(--card);
+  box-shadow:var(--shadow-out);
+}
+.conn-dot { width:8px; height:8px; border-radius:50%; }
+.conn-dot.ok { background:var(--green); }
+.conn-dot.err { background:var(--red); }
+
+.topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:12px; flex-wrap:wrap; }
+.topbar-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.hint-text { font-size:12px; color:var(--text2); margin-top:12px; line-height:1.5; }
+
+/* ── Responsive ────────────────────────── */
+@media(max-width:768px) {
+  .app { flex-direction:column; }
+  .sidebar { width:100%; flex-direction:row; overflow-x:auto; padding:16px; gap:4px; }
+  .logo { padding:0 8px 0 0; white-space:nowrap; }
+  .main { padding:20px; }
+  .stat-grid { grid-template-columns:1fr 1fr; }
+  .key-card { flex-wrap:wrap; }
+  .setting-row { flex-direction:column; align-items:stretch; }
+  .setting-row .form-label { min-width:auto; }
+}
+</style>
+</head>
+<body>
+<!-- ── Login Screen ─────────────────── -->
+<div class="login-screen" id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">NV<span>AI</span></div>
+    <div class="login-subtitle">NVIDIA API Gateway Admin</div>
+    <div class="login-card">
+      <div class="form-group">
+        <label class="form-label">API Key</label>
+        <div class="login-input-wrap">
+          <input class="form-input" id="login-key" type="password" placeholder="Enter your admin API key" autofocus>
+          <button class="login-toggle-vis" onclick="toggleLoginVis()" id="login-eye" title="Show/Hide">&#9673;</button>
+        </div>
+      </div>
+      <label class="login-remember">
+        <input type="checkbox" id="login-remember" checked> Remember on this device
+      </label>
+      <button class="login-btn" onclick="doLogin()">Sign In</button>
+      <div class="login-error" id="login-error"></div>
+    </div>
+  </div>
+</div>
+
+<div class="app" id="app-main" style="display:none">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="logo">NV<span>AI</span></div>
+    <div class="nav-item active" onclick="showPage('dashboard')">
+      <span class="nav-icon">&#9673;</span> Dashboard
+    </div>
+    <div class="nav-item" onclick="showPage('keys')">
+      <span class="nav-icon">&#9919;</span> Keys
+    </div>
+    <div class="nav-item" onclick="showPage('models')">
+      <span class="nav-icon">&#9674;</span> Models
+    </div>
+    <div class="nav-item" onclick="showPage('settings')">
+      <span class="nav-icon">&#9881;</span> Settings
+    </div>
+    <div style="flex:1"></div>
+    <div class="nav-item" onclick="logout()" style="color:var(--red);">
+      <span class="nav-icon">&#10140;</span> Logout
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <div class="main">
+    <!-- ── Dashboard ──────────────────── -->
+    <div id="page-dashboard">
+      <div class="topbar">
+        <div class="page-title">Dashboard</div>
+        <div class="conn-badge"><span class="conn-dot" id="conn-dot"></span><span id="conn-text">Checking...</span></div>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="s-total">-</div>
+          <div class="stat-label">Total Requests</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--green)" id="s-success">-</div>
+          <div class="stat-label">Successful</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--red)" id="s-fail">-</div>
+          <div class="stat-label">Failed</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="s-rate">-</div>
+          <div class="stat-label">Success Rate</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Key Overview</div>
+        <div id="dash-keys" class="key-list"></div>
+      </div>
+    </div>
+
+    <!-- ── Keys ───────────────────────── -->
+    <div id="page-keys" style="display:none">
+      <div class="topbar">
+        <div class="page-title">API Keys</div>
+        <div class="topbar-actions">
+          <button class="btn" onclick="checkAllKeys()">Check All</button>
+          <button class="btn btn-primary" onclick="openAddKey()">+ Add Key</button>
+        </div>
+      </div>
+      <div id="key-list" class="key-list"></div>
+    </div>
+
+    <!-- ── Models ──────────────────────── -->
+    <div id="page-models" style="display:none">
+      <div class="topbar">
+        <div class="page-title">Model Aliases</div>
+        <button class="btn btn-primary" onclick="openAddAlias()">+ Add Alias</button>
+      </div>
+      <div id="alias-list" style="display:flex;flex-direction:column;gap:12px;"></div>
+    </div>
+
+    <!-- ── Settings ───────────────────── -->
+    <div id="page-settings" style="display:none">
+      <div class="page-title">Settings</div>
+      <div class="card">
+        <div class="card-title">Upstream Configuration</div>
+        <div class="settings-grid">
+          <div class="setting-row">
+            <label class="form-label">Upstream Base URL</label>
+            <input class="form-input" id="cfg-upstream-url" placeholder="https://integrate.api.nvidia.com">
+          </div>
+          <div class="setting-row">
+            <label class="form-label">HTTP Proxy</label>
+            <input class="form-input" id="cfg-proxy" placeholder="http://127.0.0.1:7890 (leave empty for none)">
+          </div>
+          <div class="setting-row">
+            <label class="form-label">Upstream Timeout (s)</label>
+            <input class="form-input" id="cfg-timeout" type="number" step="1">
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Failover</div>
+        <div class="settings-grid">
+          <div class="setting-row">
+            <label class="form-label">Max Retries</label>
+            <input class="form-input" id="cfg-retries" type="number" min="1" max="10">
+          </div>
+          <div class="setting-row">
+            <label class="form-label">Cooldown (s)</label>
+            <input class="form-input" id="cfg-cooldown" type="number" min="1">
+          </div>
+          <div class="setting-row">
+            <label class="form-label">Max Consecutive Failures</label>
+            <input class="form-input" id="cfg-max-fail" type="number" min="1">
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Key Health Check</div>
+        <div class="settings-grid">
+          <div class="setting-row">
+            <label class="form-label">Auto Check</label>
+            <label class="toggle">
+              <input type="checkbox" id="cfg-health-enabled">
+              <div class="toggle-track"></div>
+              <div class="toggle-knob"></div>
+            </label>
+          </div>
+          <div class="setting-row">
+            <label class="form-label">Interval (s)</label>
+            <input class="form-input" id="cfg-health-interval" type="number" min="30">
+          </div>
+          <div class="setting-row">
+            <label class="form-label">Probe Timeout (s)</label>
+            <input class="form-input" id="cfg-health-timeout" type="number" min="1" step="1">
+          </div>
+          <div class="setting-row">
+            <label class="form-label">Probe Model</label>
+            <input class="form-input" id="cfg-health-model" placeholder="meta/llama-3.1-8b-instruct">
+          </div>
+        </div>
+        <div class="hint-text">Uses a minimal upstream chat completion probe. `403` is treated as invalid or banned, while timeout and network issues are recorded as probe failures only.</div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:4px;">
+        <button class="btn btn-primary" onclick="saveConfig()">Save Settings</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add/Edit Key Modal ────────────── -->
+<div class="overlay" id="modal-key">
+  <div class="modal">
+    <div class="modal-title" id="modal-key-title">Add Key</div>
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input" id="mk-name" placeholder="my-key-1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">API Key</label>
+      <input class="form-input" id="mk-key" placeholder="nvapi-...">
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:12px;">
+      <label class="form-label" style="margin:0">Enabled</label>
+      <label class="toggle">
+        <input type="checkbox" id="mk-enabled" checked>
+        <div class="toggle-track"></div>
+        <div class="toggle-knob"></div>
+      </label>
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="mk-submit" onclick="submitKey()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add/Edit Alias Modal ───────────── -->
+<div class="overlay" id="modal-alias">
+  <div class="modal">
+    <div class="modal-title" id="modal-alias-title">Add Model Alias</div>
+    <div class="form-group">
+      <label class="form-label">Alias (client-facing name)</label>
+      <input class="form-input" id="ma-alias" placeholder="gpt-4">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Target NVIDIA Model</label>
+      <div class="select-filter">
+        <input class="form-input" id="ma-filter" placeholder="Search models..." oninput="filterModels()">
+      </div>
+      <select class="form-select" id="ma-target" size="8" style="height:200px;overflow-y:auto;">
+        <option value="">Loading built-in models...</option>
+      </select>
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeAliasModal()">Cancel</button>
+      <button class="btn btn-primary" id="ma-submit" onclick="submitAlias()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toasts"></div>
+
+<script>
+let editingKeyName = null;
+let latestKeys = [];
+
+// ── Auth ──────────────────────────────
+function getHeaders() {
+  const key = sessionStorage.getItem('nvai_key') || localStorage.getItem('nvai_api_key') || '';
+  return { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' };
+}
+
+function toggleLoginVis() {
+  const inp = document.getElementById('login-key');
+  const isPass = inp.type === 'password';
+  inp.type = isPass ? 'text' : 'password';
+  document.getElementById('login-eye').textContent = isPass ? '\u25C9' : '\u25CE';
+}
+
+async function doLogin() {
+  const key = document.getElementById('login-key').value.trim();
+  const remember = document.getElementById('login-remember').checked;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+
+  if (!key) { errEl.textContent = 'Please enter your API key'; return; }
+
+  // validate by hitting /admin/stats
+  try {
+    const r = await fetch('/admin/stats', { headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' } });
+    if (r.status === 401) { errEl.textContent = 'Invalid API key'; return; }
+    if (!r.ok) { errEl.textContent = `Server error (${r.status})`; return; }
+  } catch(e) { errEl.textContent = 'Cannot connect to server'; return; }
+
+  // store
+  sessionStorage.setItem('nvai_key', key);
+  if (remember) localStorage.setItem('nvai_api_key', key);
+  else localStorage.removeItem('nvai_api_key');
+
+  enterApp();
+}
+
+function enterApp() {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('app-main').style.display = 'flex';
+  checkConn();
+  loadDashboard();
+}
+
+function logout() {
+  sessionStorage.removeItem('nvai_key');
+  localStorage.removeItem('nvai_api_key');
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('app-main').style.display = 'none';
+  document.getElementById('login-key').value = '';
+  document.getElementById('login-error').textContent = '';
+}
+
+// ── Toast ─────────────────────────────
+function toast(msg, type='success') {
+  const c = document.getElementById('toasts');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(()=>t.remove(),300); }, 3000);
+}
+
+// ── API helpers ───────────────────────
+async function api(path, opts={}) {
+  try {
+    const r = await fetch(`/admin${path}`, { headers: getHeaders(), ...opts });
+    if (r.status === 401) { logout(); return null; }
+    if (r.status === 204) return {};
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || `HTTP ${r.status}`); }
+    return await r.json();
+  } catch(e) { toast(e.message, 'error'); return null; }
+}
+
+function formatTimestamp(ts) {
+  if (!ts) return 'Never checked';
+  return new Date(ts * 1000).toLocaleString();
+}
+
+function getRuntimeStatusText(k) {
+  if (!k.enabled) return 'Disabled';
+  if (k.is_invalid) return 'Invalid';
+  if (!k.is_healthy) return 'Cooling Down';
+  return 'Healthy';
+}
+
+function getKeyDotClass(k) {
+  if (!k.enabled) return 'disabled';
+  if (k.is_invalid || !k.is_healthy) return 'unhealthy';
+  if (k.is_checking || k.probe_status === 'error') return 'warning';
+  return 'healthy';
+}
+
+function getProbeStatusKey(k) {
+  return k.effective_probe_status || (k.is_invalid ? 'invalid' : (k.probe_status || 'never_checked'));
+}
+
+function getProbePillClass(k) {
+  const status = getProbeStatusKey(k);
+  return status === 'never_checked' ? 'never-checked' : status;
+}
+
+function formatProbeStatus(k) {
+  const code = k.last_probe_status_code ? ` (${k.last_probe_status_code})` : '';
+  switch (getProbeStatusKey(k)) {
+    case 'checking': return 'Checking';
+    case 'healthy': return 'Valid';
+    case 'invalid': return `Invalid${code}`;
+    case 'error': return `Probe Failed${code}`;
+    default: return 'Never Checked';
+  }
+}
+
+function formatProbeDetail(k) {
+  const parts = [];
+  if (k.last_probe_time) parts.push(`Last ${formatTimestamp(k.last_probe_time)}`);
+  if (k.last_probe_trigger) parts.push(k.last_probe_trigger === 'auto' ? 'auto' : 'manual');
+  if (typeof k.last_probe_latency_ms === 'number') parts.push(`${k.last_probe_latency_ms} ms`);
+  if (k.probe_message) parts.push(k.probe_message);
+  return parts.join(' · ') || 'Not checked yet';
+}
+
+async function refreshKeyViews() {
+  await Promise.all([loadDashboard(), loadKeys()]);
+}
+
+// ── Navigation ────────────────────────
+function showPage(name) {
+  document.querySelectorAll('[id^="page-"]').forEach(p => p.style.display='none');
+  document.getElementById(`page-${name}`).style.display='';
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => { if(n.textContent.trim().toLowerCase().startsWith(name)) n.classList.add('active'); });
+  if (name==='dashboard') loadDashboard();
+  if (name==='keys') loadKeys();
+  if (name==='models') loadAliases();
+  if (name==='settings') loadConfig();
+}
+
+// ── Dashboard ─────────────────────────
+async function loadDashboard() {
+  const data = await api('/stats');
+  if (!data) return;
+  const keys = data.keys || [];
+  let succ=0, fail=0;
+  keys.forEach(k => { succ+=k.success_count; fail+=k.fail_count; });
+  const total = succ+fail;
+  document.getElementById('s-total').textContent = total.toLocaleString();
+  document.getElementById('s-success').textContent = succ.toLocaleString();
+  document.getElementById('s-fail').textContent = fail.toLocaleString();
+  document.getElementById('s-rate').textContent = total ? `${((succ/total)*100).toFixed(1)}%` : '-';
+
+  const cont = document.getElementById('dash-keys');
+  if (!keys.length) { cont.innerHTML='<div style="color:var(--text2);font-size:14px;padding:12px;">No keys configured</div>'; return; }
+  cont.innerHTML = keys.map(k => `
+    <div class="key-card">
+      <div class="key-dot ${getKeyDotClass(k)}"></div>
+      <div class="key-info">
+        <div class="key-name">${esc(k.name)}</div>
+        <div class="key-stats">
+          <span class="ok">${k.success_count} ok</span>
+          <span class="fail">${k.fail_count} fail</span>
+          <span>${esc(getRuntimeStatusText(k))}</span>
+          <span>${esc(formatProbeStatus(k))}</span>
+        </div>
+        <div class="key-meta">${esc(formatProbeDetail(k))}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Connection check ──────────────────
+async function checkConn() {
+  try {
+    const r = await fetch('/health');
+    if(r.ok) {
+      document.getElementById('conn-dot').className='conn-dot ok';
+      document.getElementById('conn-text').textContent='Connected';
+    } else { throw 0; }
+  } catch {
+    document.getElementById('conn-dot').className='conn-dot err';
+    document.getElementById('conn-text').textContent='Disconnected';
+  }
+}
+
+// ── Keys page ─────────────────────────
+async function loadKeys() {
+  const data = await api('/keys');
+  if (!data) return;
+  const keys = data.keys || [];
+  latestKeys = keys;
+  const cont = document.getElementById('key-list');
+  if (!keys.length) { cont.innerHTML='<div class="card" style="text-align:center;color:var(--text2)">No keys yet. Click "Add Key" to get started.</div>'; return; }
+  cont.innerHTML = keys.map(k => `
+    <div class="key-card">
+      <div class="key-dot ${getKeyDotClass(k)}"></div>
+      <div class="key-info">
+        <div class="key-name">${esc(k.name)}</div>
+        <div class="key-value">${esc(k.key_masked)}</div>
+        <div class="key-stats">
+          <span class="ok">${k.success_count} ok</span>
+          <span class="fail">${k.fail_count} fail</span>
+          <span>consecutive: ${k.consecutive_failures}</span>
+        </div>
+        <div class="key-meta">
+          <span class="probe-pill ${getProbePillClass(k)}">${esc(formatProbeStatus(k))}</span>
+          <span>${esc(formatProbeDetail(k))}</span>
+        </div>
+      </div>
+      <label class="toggle" title="${k.enabled?'Disable':'Enable'}">
+        <input type="checkbox" ${k.enabled?'checked':''} onchange="toggleKey('${esc(k.name)}',this.checked)">
+        <div class="toggle-track"></div>
+        <div class="toggle-knob"></div>
+      </label>
+      <div class="key-actions">
+        <button class="btn btn-sm" ${k.is_checking?'disabled':''} onclick="checkKey('${esc(k.name)}')">${k.is_checking?'Checking...':'Check'}</button>
+        <button class="btn btn-sm btn-icon" title="Reset Status" onclick="resetStats('${esc(k.name)}')">&#8634;</button>
+        <button class="btn btn-sm" onclick="openEditKey('${esc(k.name)}')">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteKey('${esc(k.name)}')">Delete</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function toggleKey(name, enabled) {
+  await api(`/keys/${encodeURIComponent(name)}`, { method:'PUT', body:JSON.stringify({enabled}) });
+  refreshKeyViews();
+}
+
+async function resetStats(name) {
+  const r = await api(`/keys/${encodeURIComponent(name)}/reset-stats`, { method:'POST' });
+  if(r) { toast('Status reset'); refreshKeyViews(); }
+}
+
+async function checkKey(name) {
+  const r = await api(`/keys/${encodeURIComponent(name)}/probe`, { method:'POST' });
+  if (!r) return;
+  const label = r.status === 'healthy' ? 'valid' : r.status === 'invalid' ? 'invalid' : 'probe failed';
+  toast(`${name}: ${label}${r.status_code ? ` (${r.status_code})` : ''}`, r.status === 'healthy' ? 'success' : 'error');
+  refreshKeyViews();
+}
+
+async function checkAllKeys() {
+  const r = await api('/keys/probe-all', { method:'POST' });
+  if (!r) return;
+  const parts = [
+    `${r.healthy_count || 0} valid`,
+    `${r.invalid_count || 0} invalid`,
+    `${r.error_count || 0} failed`,
+  ];
+  if (r.skipped_count) parts.push(`${r.skipped_count} skipped`);
+  toast(`Probe summary: ${parts.join(', ')}`, (r.invalid_count || r.error_count) ? 'error' : 'success');
+  refreshKeyViews();
+}
+
+async function deleteKey(name) {
+  if(!confirm(`Delete key "${name}"?`)) return;
+  const r = await api(`/keys/${encodeURIComponent(name)}`, { method:'DELETE' });
+  if(r!==null) { toast('Key deleted'); refreshKeyViews(); }
+}
+
+// ── Key Modal ─────────────────────────
+function openAddKey() {
+  editingKeyName = null;
+  document.getElementById('modal-key-title').textContent = 'Add Key';
+  document.getElementById('mk-submit').textContent = 'Add';
+  document.getElementById('mk-name').value = '';
+  document.getElementById('mk-key').value = '';
+  document.getElementById('mk-key').disabled = false;
+  document.getElementById('mk-enabled').checked = true;
+  document.getElementById('modal-key').classList.add('show');
+}
+
+function openEditKey(name) {
+  const current = latestKeys.find(k => k.name === name);
+  editingKeyName = name;
+  document.getElementById('modal-key-title').textContent = 'Edit Key';
+  document.getElementById('mk-submit').textContent = 'Save';
+  document.getElementById('mk-name').value = name;
+  document.getElementById('mk-key').value = '';
+  document.getElementById('mk-key').disabled = false;
+  document.getElementById('mk-key').placeholder = 'Leave empty to keep current';
+  document.getElementById('mk-enabled').checked = current ? Boolean(current.enabled) : true;
+  document.getElementById('modal-key').classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('modal-key').classList.remove('show');
+}
+
+async function submitKey() {
+  const name = document.getElementById('mk-name').value.trim();
+  const key = document.getElementById('mk-key').value.trim();
+  const enabled = document.getElementById('mk-enabled').checked;
+
+  if (!name) { toast('Name is required','error'); return; }
+
+  if (editingKeyName) {
+    const body = { new_name: name, enabled };
+    if (key) body.new_key = key;
+    const r = await api(`/keys/${encodeURIComponent(editingKeyName)}`, { method:'PUT', body:JSON.stringify(body) });
+    if (r) { toast('Key updated'); closeModal(); refreshKeyViews(); }
+  } else {
+    if (!key) { toast('API key is required','error'); return; }
+    const r = await api('/keys', { method:'POST', body:JSON.stringify({key,name,enabled}) });
+    if (r) { toast('Key added'); closeModal(); refreshKeyViews(); }
+  }
+}
+
+// ── Models page ──────────────────────
+let allNvidiaModels = [];
+let editingAlias = null;
+
+async function loadNvidiaModels() {
+  if (allNvidiaModels.length) return;
+  try {
+    const r = await fetch('/web/nvidia-models.json', { cache: 'no-store' });
+    if (r.ok) {
+      const data = await r.json();
+      allNvidiaModels = Array.isArray(data.models) ? data.models.slice() : [];
+      return;
+    }
+  } catch {}
+  allNvidiaModels = [];
+}
+
+function populateModelSelect(selectedValue) {
+  const sel = document.getElementById('ma-target');
+  const filter = (document.getElementById('ma-filter').value||'').toLowerCase();
+  const filtered = filter ? allNvidiaModels.filter(m=>m.toLowerCase().includes(filter)) : allNvidiaModels;
+  if (!allNvidiaModels.length) {
+    sel.innerHTML = '<option value="">Built-in model catalog failed to load</option>';
+    return;
+  }
+  if (!filtered.length) {
+    sel.innerHTML = '<option value="">No matching models</option>';
+    return;
+  }
+  sel.innerHTML = filtered.map(m =>
+    `<option value="${esc(m)}" ${m===selectedValue?'selected':''}>${esc(m)}</option>`
+  ).join('');
+}
+
+function filterModels() { populateModelSelect(document.getElementById('ma-target').value); }
+
+async function loadAliases() {
+  const data = await api('/models');
+  if(!data) return;
+  const aliases = data.aliases||[];
+  const cont = document.getElementById('alias-list');
+  if(!aliases.length) { cont.innerHTML='<div class="card" style="text-align:center;color:var(--text2)">No aliases yet. Click "Add Alias" to map a friendly model name.</div>'; return; }
+  cont.innerHTML = aliases.map(a => `
+    <div class="alias-card">
+      <div class="alias-info">
+        <div class="alias-name">${esc(a.alias)}</div>
+        <div class="alias-target">${esc(a.target)}</div>
+      </div>
+      <div class="alias-arrow">&rarr;</div>
+      <div class="alias-actions">
+        <button class="btn btn-sm" onclick="openEditAlias('${esc(a.alias)}','${esc(a.target)}')">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteAlias('${esc(a.alias)}')">Delete</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function openAddAlias() {
+  editingAlias = null;
+  document.getElementById('modal-alias-title').textContent = 'Add Model Alias';
+  document.getElementById('ma-submit').textContent = 'Add';
+  document.getElementById('ma-alias').value = '';
+  document.getElementById('ma-filter').value = '';
+  await loadNvidiaModels();
+  populateModelSelect('');
+  document.getElementById('modal-alias').classList.add('show');
+}
+
+async function openEditAlias(alias, target) {
+  editingAlias = alias;
+  document.getElementById('modal-alias-title').textContent = 'Edit Model Alias';
+  document.getElementById('ma-submit').textContent = 'Save';
+  document.getElementById('ma-alias').value = alias;
+  document.getElementById('ma-filter').value = '';
+  await loadNvidiaModels();
+  populateModelSelect(target);
+  document.getElementById('modal-alias').classList.add('show');
+}
+
+function closeAliasModal() { document.getElementById('modal-alias').classList.remove('show'); }
+
+async function submitAlias() {
+  const alias = document.getElementById('ma-alias').value.trim();
+  const target = document.getElementById('ma-target').value;
+  if(!alias) { toast('Alias name is required','error'); return; }
+  if(!target) { toast('Please select a target model','error'); return; }
+
+  if(editingAlias) {
+    const body = {};
+    if(alias !== editingAlias) body.new_alias = alias;
+    body.new_target = target;
+    const r = await api(`/models/${encodeURIComponent(editingAlias)}`, {method:'PUT',body:JSON.stringify(body)});
+    if(r) { toast('Alias updated'); closeAliasModal(); loadAliases(); }
+  } else {
+    const r = await api('/models', {method:'POST',body:JSON.stringify({alias,target})});
+    if(r) { toast('Alias added'); closeAliasModal(); loadAliases(); }
+  }
+}
+
+async function deleteAlias(alias) {
+  if(!confirm(`Delete alias "${alias}"?`)) return;
+  const r = await api(`/models/${encodeURIComponent(alias)}`, {method:'DELETE'});
+  if(r!==null) { toast('Alias deleted'); loadAliases(); }
+}
+
+// ── Settings ──────────────────────────
+async function loadConfig() {
+  const data = await api('/config');
+  if(!data) return;
+  document.getElementById('cfg-upstream-url').value = data.upstream_base_url || '';
+  document.getElementById('cfg-proxy').value = data.http_proxy || '';
+  document.getElementById('cfg-timeout').value = data.upstream_timeout || 120;
+  document.getElementById('cfg-retries').value = data.max_retries || 3;
+  document.getElementById('cfg-cooldown').value = data.key_cooldown_seconds || 60;
+  document.getElementById('cfg-max-fail').value = data.key_max_consecutive_failures || 3;
+  document.getElementById('cfg-health-enabled').checked = Boolean(data.key_healthcheck_enabled);
+  document.getElementById('cfg-health-interval').value = data.key_healthcheck_interval_seconds || 300;
+  document.getElementById('cfg-health-timeout').value = data.key_healthcheck_timeout || 15;
+  document.getElementById('cfg-health-model').value = data.key_healthcheck_model || '';
+}
+
+async function saveConfig() {
+  const body = {
+    upstream_base_url: document.getElementById('cfg-upstream-url').value.trim(),
+    http_proxy: document.getElementById('cfg-proxy').value.trim(),
+    upstream_timeout: parseFloat(document.getElementById('cfg-timeout').value) || 120,
+    max_retries: parseInt(document.getElementById('cfg-retries').value) || 3,
+    key_cooldown_seconds: parseInt(document.getElementById('cfg-cooldown').value) || 60,
+    key_max_consecutive_failures: parseInt(document.getElementById('cfg-max-fail').value) || 3,
+    key_healthcheck_enabled: document.getElementById('cfg-health-enabled').checked,
+    key_healthcheck_interval_seconds: parseInt(document.getElementById('cfg-health-interval').value) || 300,
+    key_healthcheck_timeout: parseFloat(document.getElementById('cfg-health-timeout').value) || 15,
+    key_healthcheck_model: document.getElementById('cfg-health-model').value.trim(),
+  };
+  const r = await api('/config', { method:'PUT', body:JSON.stringify(body) });
+  if(r) {
+    toast(r.rebuild_client ? 'Settings saved (client rebuilt)' : 'Settings saved');
+  }
+}
+
+// ── Util ──────────────────────────────
+function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+// ── Init ──────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const saved = localStorage.getItem('nvai_api_key');
+  if (saved) {
+    sessionStorage.setItem('nvai_key', saved);
+    enterApp();
+  }
+  setInterval(() => {
+    if (document.getElementById('app-main').style.display !== 'none') {
+      checkConn();
+      const active = document.querySelector('.nav-item.active');
+      if (!active) return;
+      const activeLabel = active.textContent.trim().toLowerCase();
+      if (activeLabel.startsWith('dashboard')) loadDashboard();
+      if (activeLabel.startsWith('keys')) loadKeys();
+    }
+  }, 10000);
+});
+
+// login on Enter key
+document.getElementById('login-key').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+
+// close modal on overlay click
+document.getElementById('modal-key').addEventListener('click', e => { if(e.target===e.currentTarget) closeModal(); });
+document.getElementById('modal-alias').addEventListener('click', e => { if(e.target===e.currentTarget) closeAliasModal(); });
+// close modal on Escape
+document.addEventListener('keydown', e => { if(e.key==='Escape') { closeModal(); closeAliasModal(); } });
+</script>
+</body>
+</html>
