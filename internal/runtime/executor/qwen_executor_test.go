@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tidwall/gjson"
@@ -163,5 +164,61 @@ func TestEnsureQwenExplicitCacheControl_NoSystemMessage(t *testing.T) {
 	// Last user should NOT
 	if gjson.GetBytes(output, "messages.2.content.0.cache_control").Exists() {
 		t.Fatal("last user message should not get cache_control")
+	}
+}
+
+func TestEnsureQwenSystemPrompt_InsertsFirstSystemMessage(t *testing.T) {
+	input := []byte(`{
+		"messages":[
+			{"role":"user","content":"hello"}
+		]
+	}`)
+
+	output := ensureQwenSystemPrompt(input)
+
+	if got := gjson.GetBytes(output, "messages.0.role").String(); got != "system" {
+		t.Fatalf("messages.0.role = %q, want %q", got, "system")
+	}
+	if got := gjson.GetBytes(output, "messages.1.role").String(); got != "user" {
+		t.Fatalf("messages.1.role = %q, want %q", got, "user")
+	}
+	if got := gjson.GetBytes(output, "messages.0.content.0.text").String(); !strings.Contains(got, qwenSystemPromptKey) {
+		t.Fatalf("messages.0.content.0.text missing qwen system prompt marker: %q", got)
+	}
+}
+
+func TestEnsureQwenSystemPrompt_PrependsExistingFirstSystemMessage(t *testing.T) {
+	input := []byte(`{
+		"messages":[
+			{"role":"system","content":"custom system"},
+			{"role":"user","content":"hello"}
+		]
+	}`)
+
+	output := ensureQwenSystemPrompt(input)
+
+	if got := gjson.GetBytes(output, "messages.0.content.0.text").String(); !strings.Contains(got, qwenSystemPromptKey) {
+		t.Fatalf("messages.0.content.0.text missing qwen system prompt marker: %q", got)
+	}
+	if got := gjson.GetBytes(output, "messages.0.content.1.text").String(); got != "custom system" {
+		t.Fatalf("messages.0.content.1.text = %q, want %q", got, "custom system")
+	}
+}
+
+func TestEnsureQwenSystemPrompt_DoesNotDuplicateExistingPrompt(t *testing.T) {
+	input := []byte(`{
+		"messages":[
+			{"role":"system","content":[
+				{"type":"text","text":"You are Qwen, an interactive agent developed by Alibaba Group, specializing in software engineering tasks."},
+				{"type":"text","text":"custom system"}
+			]},
+			{"role":"user","content":"hello"}
+		]
+	}`)
+
+	output := ensureQwenSystemPrompt(input)
+
+	if string(output) != string(input) {
+		t.Fatalf("payload changed even though qwen system prompt already existed:\n got: %s\nwant: %s", output, input)
 	}
 }

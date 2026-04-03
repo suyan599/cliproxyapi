@@ -13,6 +13,7 @@ import (
 
 	qwenauth "github.com/router-for-me/CLIProxyAPI/v6/internal/auth/qwen"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
@@ -27,6 +28,7 @@ const (
 	qwenUserAgent       = "QwenCode/0.13.2 (darwin; arm64)"
 	qwenRateLimitPerMin = 60          // 60 requests per minute per credential
 	qwenRateLimitWindow = time.Minute // sliding window duration
+	qwenSystemPromptKey = "You are Qwen, an interactive agent developed by Alibaba Group"
 )
 
 // qwenBeijingLoc caches the Beijing timezone to avoid repeated LoadLocation syscalls.
@@ -44,6 +46,8 @@ var qwenQuotaCodes = map[string]struct{}{
 	"insufficient_quota": {},
 	"quota_exceeded":     {},
 }
+
+var qwenCodeSystemPrompt = strings.TrimSpace(misc.QwenCodeSystemPrompt)
 
 // qwenRateLimiter tracks request timestamps per credential for rate limiting.
 // Qwen has a limit of 60 requests per minute per account.
@@ -251,6 +255,7 @@ func (e *QwenExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 
 	requestedModel := payloadRequestedModel(opts, req.Model)
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
+	body = ensureQwenSystemPrompt(body)
 	// body = ensureQwenExplicitCacheControl(baseModel, body) // disabled: upstream Qwen API rejects cache_control fields
 
 	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
@@ -364,6 +369,7 @@ func (e *QwenExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 	body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
 	requestedModel := payloadRequestedModel(opts, req.Model)
 	body = applyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
+	body = ensureQwenSystemPrompt(body)
 	// body = ensureQwenExplicitCacheControl(baseModel, body) // disabled: upstream Qwen API rejects cache_control fields
 
 	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
@@ -450,6 +456,7 @@ func (e *QwenExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Auth,
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("openai")
 	body := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, false)
+	body = ensureQwenSystemPrompt(body)
 
 	modelName := gjson.GetBytes(body, "model").String()
 	if strings.TrimSpace(modelName) == "" {
@@ -570,6 +577,128 @@ func resolveQwenUpstreamModel(model string) string {
 		}
 	}
 	return model
+}
+
+func ensureQwenSystemPrompt(payload []byte) []byte {
+	if len(payload) == 0 || qwenCodeSystemPrompt == "" {
+		return payload
+	}
+
+	messages := gjson.GetBytes(payload, "messages")
+	if !messages.IsArray() {
+		return payload
+	}
+
+	if qwenPayloadHasRequiredSystemPrompt(messages) {
+		return payload
+	}
+
+	firstRole := gjson.GetBytes(payload, "messages.0.role").String()
+	if firstRole == "system" {
+		return prependQwenSystemPromptToFirstMessage(payload)
+	}
+
+	systemMessage := map[string]any{
+		"role": "system",
+		"content": []map[string]string{{
+			"type": "text",
+			"text": qwenCodeSystemPrompt,
+		}},
+	}
+
+	newMessages := make([]any, 0, len(messages.Array())+1)
+	newMessages = append(newMessages, systemMessage)
+	messages.ForEach(func(_, message gjson.Result) bool {
+		newMessages = append(newMessages, message.Value())
+		return true
+	})
+
+	result, err := sjson.SetBytes(payload, "messages", newMessages)
+	if err != nil {
+		log.Warnf("failed to inject qwen system prompt: %v", err)
+		return payload
+	}
+	return result
+}
+
+func qwenPayloadHasRequiredSystemPrompt(messages gjson.Result) bool {
+	found := false
+	messages.ForEach(func(_, message gjson.Result) bool {
+		if message.Get("role").String() != "system" {
+			return true
+		}
+		if qwenMessageContentHasSystemPrompt(message.Get("content")) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func qwenMessageContentHasSystemPrompt(content gjson.Result) bool {
+	switch {
+	case content.Type == gjson.String:
+		return strings.Contains(content.String(), qwenSystemPromptKey)
+	case content.IsArray():
+		found := false
+		content.ForEach(func(_, item gjson.Result) bool {
+			if strings.Contains(item.Get("text").String(), qwenSystemPromptKey) {
+				found = true
+				return false
+			}
+			return true
+		})
+		return found
+	default:
+		return false
+	}
+}
+
+func prependQwenSystemPromptToFirstMessage(payload []byte) []byte {
+	contentPath := "messages.0.content"
+	content := gjson.GetBytes(payload, contentPath)
+	promptBlock := map[string]string{
+		"type": "text",
+		"text": qwenCodeSystemPrompt,
+	}
+
+	switch {
+	case content.IsArray():
+		newContent := make([]any, 0, len(content.Array())+1)
+		newContent = append(newContent, promptBlock)
+		content.ForEach(func(_, item gjson.Result) bool {
+			newContent = append(newContent, item.Value())
+			return true
+		})
+		result, err := sjson.SetBytes(payload, contentPath, newContent)
+		if err != nil {
+			log.Warnf("failed to prepend qwen system prompt to array content: %v", err)
+			return payload
+		}
+		return result
+	case content.Type == gjson.String:
+		newContent := []map[string]string{promptBlock}
+		if text := strings.TrimSpace(content.String()); text != "" {
+			newContent = append(newContent, map[string]string{
+				"type": "text",
+				"text": content.String(),
+			})
+		}
+		result, err := sjson.SetBytes(payload, contentPath, newContent)
+		if err != nil {
+			log.Warnf("failed to prepend qwen system prompt to string content: %v", err)
+			return payload
+		}
+		return result
+	default:
+		result, err := sjson.SetBytes(payload, contentPath, []map[string]string{promptBlock})
+		if err != nil {
+			log.Warnf("failed to initialize qwen system prompt content: %v", err)
+			return payload
+		}
+		return result
+	}
 }
 
 // ensureQwenExplicitCacheControl injects cache_control breakpoints for models
